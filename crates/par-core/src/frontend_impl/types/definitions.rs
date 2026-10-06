@@ -60,12 +60,13 @@ impl<S: Clone + Eq + std::hash::Hash> TypeDefs<S> {
 
         let mut cyclic_names = IndexSet::new();
         for (name, _) in type_defs.globals.iter() {
-            if let Err(e) = type_defs.validate_acyclic(name, &Default::default(), &deps_map) {
-                if let TypeError::DependencyCycle(_, names) = &e {
-                    cyclic_names.extend(names.iter().cloned());
-                }
-                errors.insert(e);
-            }
+            type_defs.validate_acyclic(
+                name,
+                &Default::default(),
+                &deps_map,
+                &mut errors,
+                &mut cyclic_names,
+            );
         }
 
         let globals = Arc::make_mut(&mut type_defs.globals);
@@ -181,24 +182,28 @@ impl<S: Clone + Eq + std::hash::Hash> TypeDefs<S> {
         name: &GlobalName<S>,
         deps_stack: &IndexSet<GlobalName<S>>,
         deps_map: &IndexMap<GlobalName<S>, Vec<GlobalName<S>>>,
-    ) -> Result<(), TypeError<S>> {
+        errors: &mut IndexSet<TypeError<S>>,
+        cyclic_names: &mut IndexSet<GlobalName<S>>,
+    ) {
         let mut deps_stack = deps_stack.clone();
         if !deps_stack.insert(name.clone()) {
-            return Err(TypeError::DependencyCycle(
+            let names: Vec<GlobalName<S>> = deps_stack
+                .clone()
+                .into_iter()
+                .skip_while(|dep| dep != name)
+                .collect();
+            cyclic_names.extend(names.iter().cloned());
+            errors.insert(TypeError::DependencyCycle(
                 self.globals[name].0.clone(),
-                deps_stack
-                    .clone()
-                    .into_iter()
-                    .skip_while(|dep| dep != name)
-                    .collect(),
+                names,
             ));
+            return;
         }
         if let Some(deps) = deps_map.get(name) {
             for dep in deps {
-                self.validate_acyclic(dep, &deps_stack, deps_map)?;
+                self.validate_acyclic(dep, &deps_stack, deps_map, errors, cyclic_names);
             }
         }
-        Ok(())
     }
 
     pub fn validate_type(&self, typ: &Type<S>) -> Result<(), TypeError<S>> {
