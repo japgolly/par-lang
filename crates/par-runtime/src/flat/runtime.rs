@@ -38,9 +38,11 @@ use super::arena::*;
 use crate::fan_behavior::FanBehavior;
 use crate::flat::stats::Rewrites;
 use crate::linker::Linked;
-use atomicbox::AtomicOptionBox;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering::AcqRel;
+use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot::Sender;
 
@@ -50,7 +52,97 @@ type Redex = (Node<Linked>, Node<Linked>);
 type Str<Ext> = Index<Ext, str>;
 
 #[derive(Debug)]
-struct InstanceInner(Box<[AtomicOptionBox<Node<Linked>>]>);
+struct InstanceInner(Box<[Slot]>);
+
+const SLOT_EMPTY: u8 = 0;
+const SLOT_FULL: u8 = 1;
+const SLOT_BUSY: u8 = 2;
+
+/// A variable slot of an [`Instance`], storing its node inline.
+///
+/// Slots are filled by the reducer, but external handles may concurrently take
+/// nodes out of them (see [`Linker::deref`]). The `state` acts as a tiny spin
+/// lock guarding `node`, which is initialized exactly when the state is
+/// `SLOT_FULL`. Locking is done by swapping in `SLOT_BUSY`, which turned out
+/// considerably faster than a compare-and-swap on Apple silicon.
+struct Slot {
+    state: AtomicU8,
+    node: UnsafeCell<MaybeUninit<Node<Linked>>>,
+}
+
+// SAFETY: access to `node` is serialized by `state`.
+unsafe impl Sync for Slot {}
+
+impl Slot {
+    fn new() -> Self {
+        Self {
+            state: AtomicU8::new(SLOT_EMPTY),
+            node: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    #[inline(always)]
+    fn take(&self) -> Option<Node<Linked>> {
+        loop {
+            match self.state.swap(SLOT_BUSY, Acquire) {
+                SLOT_FULL => {
+                    // SAFETY: the slot was full and we hold it busy.
+                    let node = unsafe { (*self.node.get()).assume_init_read() };
+                    self.state.store(SLOT_EMPTY, Release);
+                    return Some(node);
+                }
+                SLOT_EMPTY => {
+                    self.state.store(SLOT_EMPTY, Release);
+                    return None;
+                }
+                _ => std::hint::spin_loop(),
+            }
+        }
+    }
+
+    /// Puts `node` into the slot if it's empty. If it's already full, empties
+    /// it instead, and returns the previous node together with `node`.
+    #[inline(always)]
+    fn put(&self, node: Node<Linked>) -> Option<(Node<Linked>, Node<Linked>)> {
+        loop {
+            match self.state.swap(SLOT_BUSY, Acquire) {
+                SLOT_EMPTY => {
+                    // SAFETY: the slot was empty and we hold it busy.
+                    unsafe { (*self.node.get()).write(node) };
+                    self.state.store(SLOT_FULL, Release);
+                    return None;
+                }
+                SLOT_FULL => {
+                    // SAFETY: the slot was full and we hold it busy.
+                    let other = unsafe { (*self.node.get()).assume_init_read() };
+                    self.state.store(SLOT_EMPTY, Release);
+                    return Some((other, node));
+                }
+                _ => std::hint::spin_loop(),
+            }
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        if *self.state.get_mut() == SLOT_FULL {
+            // SAFETY: the slot is full, so the node is initialized.
+            unsafe { self.node.get_mut().assume_init_drop() }
+        }
+    }
+}
+
+impl Debug for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self.state.load(Acquire) {
+            SLOT_EMPTY => "Empty",
+            SLOT_FULL => "Full",
+            _ => "Busy",
+        };
+        f.debug_tuple("Slot").field(&state).finish()
+    }
+}
 
 #[derive(Clone, Debug)]
 /// An `Instance` stores the state associated to an instance of a Global node.
@@ -393,13 +485,13 @@ pub(crate) trait Linker {
                     let global = arena.get(index);
                     match global {
                         Global::Variable(i) => {
-                            let slot = instance.vars.0.get(*i).unwrap().take(AcqRel);
+                            let slot = instance.vars.0.get(*i).unwrap().take();
                             match slot {
                                 None => {
                                     return Node::Global(instance, index);
                                 }
                                 Some(node2) => {
-                                    node = *node2;
+                                    node = node2;
                                 }
                             }
                         }
@@ -431,12 +523,8 @@ pub(crate) trait Linker {
     // Package-related methods
     fn create_package_instance(&mut self, package: &Package<Linked>) -> Instance {
         let num_vars = package.num_vars;
-        let mut vars = Vec::with_capacity(num_vars);
-        for _ in 0..num_vars {
-            vars.push(AtomicOptionBox::none());
-        }
         Instance {
-            vars: Arc::new(InstanceInner(vars.into_boxed_slice())),
+            vars: Arc::new(InstanceInner((0..num_vars).map(|_| Slot::new()).collect())),
         }
     }
 
@@ -559,14 +647,7 @@ impl Runtime {
             .0
             .get(index)
             .expect("Invalid index in variable!");
-        let other = slot.swap(Some(Box::new(value)), AcqRel);
-        match other {
-            Some(other) => {
-                let value = slot.take(AcqRel).unwrap();
-                Some((*other, *value))
-            }
-            None => None,
-        }
+        slot.put(value)
     }
     pub fn status(&self) {
         println!("Runtime status");
@@ -638,15 +719,17 @@ impl Runtime {
                 }
                 Global::Variable(id) => {
                     let slot = &instance.vars.0[*id];
-                    match slot.take(AcqRel) {
+                    match slot.take() {
                         Some(node) => {
                             self.rewrites.share_sync += 1;
-                            Some(self.share_inner(*node)?)
+                            Some(self.share_inner(node)?)
                         }
                         _ => {
                             self.rewrites.share_async += 1;
                             let (hole, shared) = self.create_share_hole();
-                            slot.swap(Some(Box::new(hole)), AcqRel);
+                            if let Some((other, hole)) = slot.put(hole) {
+                                self.link(other, hole);
+                            }
                             Some(shared)
                         }
                     }
