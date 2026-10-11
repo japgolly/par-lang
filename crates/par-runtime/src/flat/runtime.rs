@@ -527,6 +527,7 @@ macro_rules! sym {
 }
 
 impl Linker for Runtime {
+    #[inline(always)]
     fn link(&mut self, a: Node<Linked>, b: Node<Linked>) {
         self.redexes.push((a, b));
     }
@@ -537,6 +538,7 @@ impl Linker for Runtime {
 
 impl Runtime {
     // Misc methods.
+    #[inline(always)]
     fn set_var(&mut self, instance: Instance, index: usize, value: Node<Linked>) {
         let slot = instance
             .vars
@@ -729,6 +731,28 @@ impl Runtime {
         let is_expand = |g: Option<&Global<Linked>>| {
             matches!(g, Some(Global::Package(_, _, FanBehavior::Expand)))
         };
+        // Whether a fanout interacting with this node gets to act as (3).
+        let fanout_applies = |g: Option<&Global<Linked>>, node: &Node<Linked>| match node {
+            Node::Global(..) => !matches!(
+                g,
+                Some(
+                    Global::Package(_, _, FanBehavior::Expand)
+                        | Global::Variable(_)
+                        | Global::Close { .. }
+                )
+            ),
+            Node::Linear(Linear::Variable(_)) | Node::Shared(Shared::Async(_)) | Node::Empty => {
+                false
+            }
+            Node::Linear(_) | Node::Shared(Shared::Sync(_)) => true,
+        };
+        let is_break = |g: Option<&Global<Linked>>, node: &Node<Linked>| match node {
+            Node::Global(..) => matches!(g, Some(Global::Value(Value::Break))),
+            Node::Shared(Shared::Sync(shared)) => {
+                matches!(**shared, SyncShared::Value(Value::Break))
+            }
+            _ => false,
+        };
         let (ga, gb) = (global(&a), global(&b));
         match (ga, gb) {
             // (2) Linking variables. Only box-like packages take precedence.
@@ -746,7 +770,22 @@ impl Runtime {
                 };
                 self.set_var(instance, index, a);
             }
-            // (6) Destructuring a global pair with a global par.
+            // (3) Fanout.
+            (Some(Global::Fanout(destinations)), gb) if fanout_applies(gb, &b) => {
+                let destinations = *destinations;
+                let Node::Global(instance, _) = a else {
+                    unreachable!()
+                };
+                self.interact_fanout(instance, destinations, b);
+            }
+            (ga, Some(Global::Fanout(destinations))) if fanout_applies(ga, &a) => {
+                let destinations = *destinations;
+                let Node::Global(instance, _) = b else {
+                    unreachable!()
+                };
+                self.interact_fanout(instance, destinations, a);
+            }
+            // (6) Destructuring global values.
             (
                 Some(Global::Value(Value::Pair(a0, a1))),
                 Some(Global::Destruct(GlobalCont::Par(b0, b1))),
@@ -769,40 +808,81 @@ impl Runtime {
                 };
                 self.interact_pair_par(value_instance, a0, a1, par_instance, b0, b1);
             }
-            // (3) Fanout of an already shared value.
-            (Some(Global::Fanout(destinations)), None)
-                if matches!(b, Node::Shared(Shared::Sync(_))) =>
-            {
-                let destinations = *destinations;
-                let (Node::Global(instance, _), Node::Shared(shared)) = (a, b) else {
+            (
+                Some(Global::Value(Value::Either(signal, payload))),
+                Some(Global::Destruct(GlobalCont::Choice(context, options))),
+            ) => {
+                let (signal, payload, context, options) = (*signal, *payload, *context, *options);
+                let (Node::Global(value_instance, _), Node::Global(choice_instance, _)) = (a, b)
+                else {
                     unreachable!()
                 };
-                self.rewrites.fanout += 1;
-                for dest in destinations {
-                    self.redexes.push((
-                        Node::Global(instance.clone(), dest),
-                        Node::Shared(shared.clone()),
-                    ));
-                }
+                self.interact_either_choice(
+                    signal,
+                    Node::Global(value_instance, payload),
+                    choice_instance,
+                    context,
+                    options,
+                );
             }
-            (None, Some(Global::Fanout(destinations)))
-                if matches!(a, Node::Shared(Shared::Sync(_))) =>
-            {
-                let destinations = *destinations;
-                let (Node::Shared(shared), Node::Global(instance, _)) = (a, b) else {
+            (
+                Some(Global::Destruct(GlobalCont::Choice(context, options))),
+                Some(Global::Value(Value::Either(signal, payload))),
+            ) => {
+                let (signal, payload, context, options) = (*signal, *payload, *context, *options);
+                let (Node::Global(choice_instance, _), Node::Global(value_instance, _)) = (a, b)
+                else {
                     unreachable!()
                 };
-                self.rewrites.fanout += 1;
-                for dest in destinations {
-                    self.redexes.push((
-                        Node::Global(instance.clone(), dest),
-                        Node::Shared(shared.clone()),
-                    ));
-                }
+                self.interact_either_choice(
+                    signal,
+                    Node::Global(value_instance, payload),
+                    choice_instance,
+                    context,
+                    options,
+                );
+            }
+            (Some(Global::Destruct(GlobalCont::Continue)), gb) if is_break(gb, &b) => {
+                self.rewrites.r#continue += 1;
+            }
+            (ga, Some(Global::Destruct(GlobalCont::Continue))) if is_break(ga, &a) => {
+                self.rewrites.r#continue += 1;
             }
             _ => return Err((a, b)),
         }
         Ok(())
+    }
+
+    fn interact_either_choice(
+        &mut self,
+        signal: Str<Linked>,
+        payload: Node<Linked>,
+        instance: Instance,
+        context: GlobalPtr<Linked>,
+        options: Index<Linked, [(Str<Linked>, PackageBody<Linked>)]>,
+    ) {
+        self.rewrites.r#match += 1;
+        if let Some(package) = self.lookup_case_branch(options, signal) {
+            let root = self.instantiate_linked_package_body_captures(
+                instance.clone(),
+                package,
+                Node::Global(instance, context),
+            );
+            self.link(payload, root);
+        } else {
+            let branch = self.lookup_case_branch(options, self.arena.empty_string());
+            let root = self.instantiate_linked_package_body_captures(
+                instance.clone(),
+                branch.unwrap(),
+                Node::Global(instance, context),
+            );
+            // TODO: Optimize this; we're reconstructing the `Either` branch.
+            // This could make us lose sharing.
+            self.link(
+                Node::Linear(Linear::Value(Box::new(Value::Either(signal, payload)))),
+                root,
+            );
+        }
     }
 
     #[inline(always)]
@@ -1290,33 +1370,7 @@ impl Runtime {
                         self.link(a1, Node::Global(instance, b1));
                     }
                     (Value::Either(signal, payload), GlobalCont::Choice(context, options)) => {
-                        self.rewrites.r#match += 1;
-                        if let Some(package) =
-                            self.lookup_case_branch(options.clone(), signal.clone())
-                        {
-                            let root = self.instantiate_linked_package_body_captures(
-                                instance.clone(),
-                                package,
-                                Node::Global(instance, context),
-                            );
-                            self.link(payload, root);
-                        } else {
-                            let branch =
-                                self.lookup_case_branch(options, self.arena.empty_string());
-                            let root = self.instantiate_linked_package_body_captures(
-                                instance.clone(),
-                                branch.unwrap(),
-                                Node::Global(instance, context),
-                            );
-                            // TODO: Optimize this; we're reconstructing the `Either` branch.
-                            // This could make us lose sharing.
-                            self.link(
-                                Node::Linear(Linear::Value(Box::new(Value::Either(
-                                    signal, payload,
-                                )))),
-                                root,
-                            );
-                        }
+                        self.interact_either_choice(signal, payload, instance, context, options);
                     }
                     (_, GlobalCont::Unbox(_)) => {
                         unreachable!("unbox must interact with a box representation")
