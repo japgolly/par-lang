@@ -46,6 +46,7 @@ use tokio::sync::oneshot::Sender;
 
 pub type PackagePtr<Ext> = Index<Ext, OnceLock<Package<Ext>>>;
 pub(crate) type GlobalPtr<Ext> = Index<Ext, Global<Ext>>;
+type Redex = (Node<Linked>, Node<Linked>);
 type Str<Ext> = Index<Ext, str>;
 
 #[derive(Debug)]
@@ -540,6 +541,19 @@ impl Runtime {
     // Misc methods.
     #[inline(always)]
     fn set_var(&mut self, instance: Instance, index: usize, value: Node<Linked>) {
+        if let Some((a, b)) = self.set_var_next(instance, index, value) {
+            self.link(a, b);
+        }
+    }
+    /// Like [`Runtime::set_var`], but returns the resulting redex, if any,
+    /// instead of pushing it.
+    #[inline(always)]
+    fn set_var_next(
+        &mut self,
+        instance: Instance,
+        index: usize,
+        value: Node<Linked>,
+    ) -> Option<Redex> {
         let slot = instance
             .vars
             .0
@@ -549,9 +563,9 @@ impl Runtime {
         match other {
             Some(other) => {
                 let value = slot.take(AcqRel).unwrap();
-                self.link(*other, *value);
+                Some((*other, *value))
             }
-            None => {}
+            None => None,
         }
     }
     pub fn status(&self) {
@@ -566,12 +580,20 @@ impl Runtime {
     ///
     /// This function is analogous to a "VM enter"
     pub fn reduce(&mut self) -> Option<(UserData, Node<Linked>)> {
-        while let Some((a, b)) = self.redexes.pop() {
-            if let Err((a, b)) = self.interact_fast(a, b) {
-                if let Some(v) = self.interact(a, b) {
-                    return Some(v);
+        let mut next = self.redexes.pop();
+        while let Some((a, b)) = next {
+            next = match self.interact_fast(a, b) {
+                // Process the last redex produced by the interaction right away,
+                // as if it was pushed and popped.
+                Ok(Some(redex)) => Some(redex),
+                Ok(None) => self.redexes.pop(),
+                Err((a, b)) => {
+                    if let Some(v) = self.interact(a, b) {
+                        return Some(v);
+                    }
+                    self.redexes.pop()
                 }
-            }
+            };
         }
         None
     }
@@ -681,20 +703,26 @@ impl Runtime {
     }
 
     // Interact-related methods
+    /// Returns the redex of the last destination instead of pushing it.
     fn interact_fanout(
         &mut self,
         instance: Instance,
         destinations: Index<Linked, [Global<Linked>]>,
         other: Node<Linked>,
-    ) {
+    ) -> Option<Redex> {
         self.rewrites.fanout += 1;
         let other = self.share(other).unwrap();
+        let mut last = None;
         for dest in destinations {
-            self.redexes.push((
+            let redex = (
                 Node::Global(instance.clone(), dest),
                 Node::Shared(other.clone()),
-            ));
+            );
+            if let Some(previous) = last.replace(redex) {
+                self.redexes.push(previous);
+            }
         }
+        last
     }
     fn interact_instantiate(
         &mut self,
@@ -721,11 +749,10 @@ impl Runtime {
     /// match in [`Runtime::interact`]. Each case here must agree with the
     /// priority order documented there; anything else is handed back.
     #[inline(always)]
-    fn interact_fast(
-        &mut self,
-        a: Node<Linked>,
-        b: Node<Linked>,
-    ) -> Result<(), (Node<Linked>, Node<Linked>)> {
+    ///
+    /// On success, returns the last redex produced by the interaction, which
+    /// should be processed next, instead of pushing it.
+    fn interact_fast(&mut self, a: Node<Linked>, b: Node<Linked>) -> Result<Option<Redex>, Redex> {
         let global = |node: &Node<Linked>| match node {
             Node::Global(_, index) => Some(self.arena.get(*index)),
             _ => None,
@@ -763,14 +790,14 @@ impl Runtime {
                 let Node::Global(instance, _) = a else {
                     unreachable!()
                 };
-                self.set_var(instance, index, b);
+                return Ok(self.set_var_next(instance, index, b));
             }
             (ga, Some(Global::Variable(index))) if !is_expand(ga) => {
                 let index = *index;
                 let Node::Global(instance, _) = b else {
                     unreachable!()
                 };
-                self.set_var(instance, index, a);
+                return Ok(self.set_var_next(instance, index, a));
             }
             // (3) Fanout.
             (Some(Global::Fanout(destinations)), gb) if fanout_applies(gb, &b) => {
@@ -778,14 +805,14 @@ impl Runtime {
                 let Node::Global(instance, _) = a else {
                     unreachable!()
                 };
-                self.interact_fanout(instance, destinations, b);
+                return Ok(self.interact_fanout(instance, destinations, b));
             }
             (ga, Some(Global::Fanout(destinations))) if fanout_applies(ga, &a) => {
                 let destinations = *destinations;
                 let Node::Global(instance, _) = b else {
                     unreachable!()
                 };
-                self.interact_fanout(instance, destinations, a);
+                return Ok(self.interact_fanout(instance, destinations, a));
             }
             // (6) Destructuring global values.
             (
@@ -797,7 +824,14 @@ impl Runtime {
                 else {
                     unreachable!()
                 };
-                self.interact_pair_par(value_instance, a0, a1, par_instance, b0, b1);
+                return Ok(Some(self.interact_pair_par(
+                    value_instance,
+                    a0,
+                    a1,
+                    par_instance,
+                    b0,
+                    b1,
+                )));
             }
             (
                 Some(Global::Destruct(GlobalCont::Par(b0, b1))),
@@ -808,7 +842,14 @@ impl Runtime {
                 else {
                     unreachable!()
                 };
-                self.interact_pair_par(value_instance, a0, a1, par_instance, b0, b1);
+                return Ok(Some(self.interact_pair_par(
+                    value_instance,
+                    a0,
+                    a1,
+                    par_instance,
+                    b0,
+                    b1,
+                )));
             }
             (
                 Some(Global::Value(Value::Either(signal, payload))),
@@ -819,13 +860,13 @@ impl Runtime {
                 else {
                     unreachable!()
                 };
-                self.interact_either_choice(
+                return Ok(Some(self.interact_either_choice(
                     signal,
                     Node::Global(value_instance, payload),
                     choice_instance,
                     context,
                     options,
-                );
+                )));
             }
             (
                 Some(Global::Destruct(GlobalCont::Choice(context, options))),
@@ -836,13 +877,13 @@ impl Runtime {
                 else {
                     unreachable!()
                 };
-                self.interact_either_choice(
+                return Ok(Some(self.interact_either_choice(
                     signal,
                     Node::Global(value_instance, payload),
                     choice_instance,
                     context,
                     options,
-                );
+                )));
             }
             (Some(Global::Destruct(GlobalCont::Continue)), gb) if is_break(gb, &b) => {
                 self.rewrites.r#continue += 1;
@@ -852,9 +893,10 @@ impl Runtime {
             }
             _ => return Err((a, b)),
         }
-        Ok(())
+        Ok(None)
     }
 
+    /// Returns the redex of the payload with the branch instead of pushing it.
     fn interact_either_choice(
         &mut self,
         signal: Str<Linked>,
@@ -862,7 +904,7 @@ impl Runtime {
         instance: Instance,
         context: GlobalPtr<Linked>,
         options: Index<Linked, [(Str<Linked>, PackageBody<Linked>)]>,
-    ) {
+    ) -> Redex {
         self.rewrites.r#match += 1;
         if let Some(package) = self.lookup_case_branch(options, signal) {
             let root = self.instantiate_linked_package_body_captures(
@@ -870,7 +912,7 @@ impl Runtime {
                 package,
                 Node::Global(instance, context),
             );
-            self.link(payload, root);
+            (payload, root)
         } else {
             let branch = self.lookup_case_branch(options, self.arena.empty_string());
             let root = self.instantiate_linked_package_body_captures(
@@ -880,13 +922,14 @@ impl Runtime {
             );
             // TODO: Optimize this; we're reconstructing the `Either` branch.
             // This could make us lose sharing.
-            self.link(
+            (
                 Node::Linear(Linear::Value(Box::new(Value::Either(signal, payload)))),
                 root,
-            );
+            )
         }
     }
 
+    /// Returns the redex of the second halves instead of pushing it.
     #[inline(always)]
     fn interact_pair_par(
         &mut self,
@@ -896,16 +939,16 @@ impl Runtime {
         par_instance: Instance,
         b0: GlobalPtr<Linked>,
         b1: GlobalPtr<Linked>,
-    ) {
+    ) -> Redex {
         self.rewrites.receive += 1;
         self.link(
             Node::Global(value_instance.clone(), a0),
             Node::Global(par_instance.clone(), b0),
         );
-        self.link(
+        (
             Node::Global(value_instance, a1),
             Node::Global(par_instance, b1),
-        );
+        )
     }
 
     /// Carry out an interaction between two nodes.
@@ -1062,7 +1105,11 @@ impl Runtime {
                 NodeRef::Global(instance, _, Global::Fanout(destinations)),
                 other
             ) => {
-                self.interact_fanout(instance, *destinations, other.into_node());
+                if let Some((a, b)) =
+                    self.interact_fanout(instance, *destinations, other.into_node())
+                {
+                    self.link(a, b);
+                }
             }
             sym!(NodeRef::Linear(Linear::ShareHole(hole)), other) => {
                 self.fill_hole(hole, other.into_node())
@@ -1372,7 +1419,9 @@ impl Runtime {
                         self.link(a1, Node::Global(instance, b1));
                     }
                     (Value::Either(signal, payload), GlobalCont::Choice(context, options)) => {
-                        self.interact_either_choice(signal, payload, instance, context, options);
+                        let (a, b) = self
+                            .interact_either_choice(signal, payload, instance, context, options);
+                        self.link(a, b);
                     }
                     (_, GlobalCont::Unbox(_)) => {
                         unreachable!("unbox must interact with a box representation")
