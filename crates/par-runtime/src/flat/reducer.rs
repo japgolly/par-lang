@@ -6,6 +6,7 @@ use futures::future::RemoteHandle;
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::task::{FutureObj, Spawn, SpawnExt};
 use std::future::poll_fn;
+use std::sync::atomic::{Ordering::Acquire, fence};
 use std::sync::{Arc, Weak};
 use std::task::Poll;
 use std::time::Instant;
@@ -14,6 +15,8 @@ use tokio::sync::mpsc;
 pub enum ReducerMessage {
     Redex(Node<Linked>, Node<Linked>),
     Spawn(FutureObj<'static, ()>),
+    /// All handles have been dropped.
+    Released,
 }
 
 /// What handles need to reach their net: the reducer's inbox and the arena.
@@ -22,6 +25,13 @@ pub enum ReducerMessage {
 pub struct NetShared {
     sender: mpsc::UnboundedSender<ReducerMessage>,
     pub(crate) arena: Arc<Arena<Linked>>,
+}
+
+impl Drop for NetShared {
+    fn drop(&mut self) {
+        // Wake up the reducer, in case it's waiting, so it can tell it's done.
+        let _ = self.sender.send(ReducerMessage::Released);
+    }
 }
 
 #[derive(Clone)]
@@ -42,9 +52,14 @@ pub(crate) struct Reducer {
     measure_net_duration: bool,
     spawner: Arc<dyn Spawn + Send + Sync>,
     inbox: mpsc::UnboundedReceiver<ReducerMessage>,
-    // The reducer doesn't keep its inbox open by itself: once all handles are
-    // dropped and the inbox is drained, the net is done.
+    sender: mpsc::UnboundedSender<ReducerMessage>,
+    // Once all handles are dropped, the inbox is drained, and no external
+    // calls are pending, the net is done.
     net: Weak<NetShared>,
+    // A handle kept alive while the reducer is busy, so that consecutive
+    // external calls don't need to set up a new `NetShared`. It's dropped
+    // before waiting, so it doesn't count as a live handle.
+    active_net: Option<NetHandle>,
     // External calls remain independent futures, but are cooperatively polled
     // by the reducer instead of allocating a Tokio task for every call.
     external_tasks: FuturesUnordered<super::runtime::ExternalFnRet>,
@@ -58,7 +73,7 @@ impl Reducer {
     ) -> (Self, NetHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let net = Arc::new(NetShared {
-            sender: tx,
+            sender: tx.clone(),
             arena: runtime.arena.clone(),
         });
         (
@@ -67,41 +82,30 @@ impl Reducer {
                 measure_net_duration,
                 spawner,
                 inbox: rx,
+                sender: tx,
                 net: Arc::downgrade(&net),
+                active_net: None,
                 external_tasks: FuturesUnordered::new(),
             },
             NetHandle(net),
         )
     }
-    // this function should only be called inside run, to avoid race conditions
     fn net_handle(&mut self) -> NetHandle {
-        if let Some(net) = self.net.upgrade() {
-            return NetHandle(net);
+        if let Some(net) = &self.active_net {
+            return net.clone();
         }
-        // all handles have been dropped, so we can just create a new channel
-        let (tx, rx) = mpsc::unbounded_channel();
-        // forward the old messages to the new channel
-        loop {
-            match self.inbox.try_recv() {
-                Ok(msg) => {
-                    tx.send(msg).unwrap();
-                }
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    // The last sender is still in the middle of being dropped.
-                    std::thread::yield_now();
-                }
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    // it's guaranteed there will never be another message
-                    break;
-                }
+        let net = match self.net.upgrade() {
+            Some(net) => net,
+            None => {
+                let net = Arc::new(NetShared {
+                    sender: self.sender.clone(),
+                    arena: self.runtime.arena.clone(),
+                });
+                self.net = Arc::downgrade(&net);
+                net
             }
-        }
-        self.inbox = rx;
-        let net = Arc::new(NetShared {
-            sender: tx,
-            arena: self.runtime.arena.clone(),
-        });
-        self.net = Arc::downgrade(&net);
+        };
+        self.active_net = Some(NetHandle(net.clone()));
         NetHandle(net)
     }
     fn handle_message(&mut self, msg: ReducerMessage) {
@@ -112,6 +116,7 @@ impl Reducer {
             ReducerMessage::Spawn(s) => {
                 self.spawner.spawn_obj(s).unwrap();
             }
+            ReducerMessage::Released => {}
         }
     }
     async fn schedule_external(&mut self, mut task: super::runtime::ExternalFnRet) {
@@ -122,7 +127,6 @@ impl Reducer {
         }
     }
     pub(crate) async fn run(&mut self) {
-        let mut inbox_closed = false;
         loop {
             loop {
                 if !self.runtime.redexes.is_empty() {
@@ -161,28 +165,25 @@ impl Reducer {
                     }
                 }
             }
+            // Nothing to do right now.
+            self.active_net = None;
             if self.external_tasks.is_empty() {
-                if inbox_closed {
-                    break;
-                }
-                match self.inbox.recv().await {
-                    Some(msg) => {
-                        self.handle_message(msg);
+                if self.net.strong_count() == 0 {
+                    // No more messages can come. Make sure to see all the ones
+                    // sent before the last handle was dropped.
+                    fence(Acquire);
+                    match self.inbox.try_recv() {
+                        Ok(msg) => self.handle_message(msg),
+                        Err(_) => break,
                     }
-                    None => {
-                        inbox_closed = true;
-                    }
+                } else {
+                    let msg = self.inbox.recv().await;
+                    self.handle_message(msg.expect("the reducer holds a sender"));
                 }
-            } else if inbox_closed {
-                self.external_tasks.next().await;
             } else {
                 tokio::select! {
                     msg = self.inbox.recv() => {
-                        if let Some(msg) = msg {
-                            self.handle_message(msg);
-                        } else {
-                            inbox_closed = true;
-                        }
+                        self.handle_message(msg.expect("the reducer holds a sender"));
                     }
                     _ = self.external_tasks.next() => {}
                 }
