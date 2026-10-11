@@ -1,12 +1,12 @@
 use super::readback::Handle;
+use crate::flat::arena::Arena;
 use crate::flat::runtime::{Node, Runtime, UserData};
 use crate::linker::Linked;
 use futures::future::RemoteHandle;
 use futures::stream::{FuturesUnordered, StreamExt};
 use futures::task::{FutureObj, Spawn, SpawnExt};
 use std::future::poll_fn;
-use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Weak};
 use std::task::Poll;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -14,24 +14,26 @@ use tokio::sync::mpsc;
 pub enum ReducerMessage {
     Redex(Node<Linked>, Node<Linked>),
     Spawn(FutureObj<'static, ()>),
-    Dropped(usize),
-    Created(usize),
 }
 
-pub struct NetHandle(
-    pub mpsc::UnboundedSender<ReducerMessage>,
-    pub usize,
-    pub Arc<AtomicUsize>,
-);
+/// What handles need to reach their net: the reducer's inbox and the arena.
+///
+/// It's shared by all handles of a net, so that cloning a handle is cheap.
+pub struct NetShared {
+    sender: mpsc::UnboundedSender<ReducerMessage>,
+    pub(crate) arena: Arc<Arena<Linked>>,
+}
 
-impl Clone for NetHandle {
-    fn clone(&self) -> Self {
-        let new = Self(
-            self.0.clone(),
-            self.2.fetch_add(1, std::sync::atomic::Ordering::AcqRel),
-            self.2.clone(),
-        );
-        new
+#[derive(Clone)]
+pub struct NetHandle(Arc<NetShared>);
+
+impl NetHandle {
+    pub(crate) fn send(&self, msg: ReducerMessage) {
+        self.0.sender.send(msg).unwrap()
+    }
+
+    pub(crate) fn arena(&self) -> &Arc<Arena<Linked>> {
+        &self.0.arena
     }
 }
 
@@ -40,8 +42,9 @@ pub(crate) struct Reducer {
     measure_net_duration: bool,
     spawner: Arc<dyn Spawn + Send + Sync>,
     inbox: mpsc::UnboundedReceiver<ReducerMessage>,
-    sender: mpsc::WeakUnboundedSender<ReducerMessage>,
-    num_handles: Arc<AtomicUsize>,
+    // The reducer doesn't keep its inbox open by itself: once all handles are
+    // dropped and the inbox is drained, the net is done.
+    net: Weak<NetShared>,
     // External calls remain independent futures, but are cooperatively polled
     // by the reducer instead of allocating a Tokio task for every call.
     external_tasks: FuturesUnordered<super::runtime::ExternalFnRet>,
@@ -54,55 +57,52 @@ impl Reducer {
         measure_net_duration: bool,
     ) -> (Self, NetHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let num_handles = Arc::new(AtomicUsize::new(0));
+        let net = Arc::new(NetShared {
+            sender: tx,
+            arena: runtime.arena.clone(),
+        });
         (
             Self {
                 runtime,
                 measure_net_duration,
                 spawner,
                 inbox: rx,
-                sender: tx.downgrade(),
-                num_handles: num_handles.clone(),
+                net: Arc::downgrade(&net),
                 external_tasks: FuturesUnordered::new(),
             },
-            NetHandle(tx, 0, num_handles),
+            NetHandle(net),
         )
     }
     // this function should only be called inside run, to avoid race conditions
-    async fn net_handle(&mut self) -> NetHandle {
-        if let Some(sender) = self.sender.upgrade() {
-            NetHandle(
-                sender,
-                self.num_handles
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel),
-                self.num_handles.clone(),
-            )
-        } else {
-            // all senders have been dropped, so we can just create a new one channel
-            let (tx, rx) = mpsc::unbounded_channel();
-            // forward the old messages to the new channel
-            loop {
-                match self.inbox.try_recv() {
-                    Ok(msg) => {
-                        tx.send(msg).unwrap();
-                    }
-                    Err(mpsc::error::TryRecvError::Empty) => {
-                        if self.inbox.is_closed() {
-                            break;
-                        } else {
-                            unreachable!("All senders should have been dropped!")
-                        }
-                    }
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        // it's guaranteed there will never be another message
-                        break;
-                    }
+    fn net_handle(&mut self) -> NetHandle {
+        if let Some(net) = self.net.upgrade() {
+            return NetHandle(net);
+        }
+        // all handles have been dropped, so we can just create a new channel
+        let (tx, rx) = mpsc::unbounded_channel();
+        // forward the old messages to the new channel
+        loop {
+            match self.inbox.try_recv() {
+                Ok(msg) => {
+                    tx.send(msg).unwrap();
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // The last sender is still in the middle of being dropped.
+                    std::thread::yield_now();
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // it's guaranteed there will never be another message
+                    break;
                 }
             }
-            self.inbox = rx;
-            self.sender = tx.downgrade();
-            NetHandle(tx, 0, self.num_handles.clone())
         }
+        self.inbox = rx;
+        let net = Arc::new(NetShared {
+            sender: tx,
+            arena: self.runtime.arena.clone(),
+        });
+        self.net = Arc::downgrade(&net);
+        NetHandle(net)
     }
     fn handle_message(&mut self, msg: ReducerMessage) {
         match msg {
@@ -112,8 +112,6 @@ impl Reducer {
             ReducerMessage::Spawn(s) => {
                 self.spawner.spawn_obj(s).unwrap();
             }
-            ReducerMessage::Dropped(_) => {}
-            ReducerMessage::Created(_) => {}
         }
     }
     async fn schedule_external(&mut self, mut task: super::runtime::ExternalFnRet) {
@@ -143,19 +141,11 @@ impl Reducer {
                     if let Some((a, b)) = reduction {
                         match (a, b) {
                             (UserData::ExternalFn(f), other) => {
-                                let handle = Handle::from_node(
-                                    self.runtime.arena.clone(),
-                                    self.net_handle().await,
-                                    other,
-                                );
+                                let handle = Handle::from_node(self.net_handle(), other);
                                 self.schedule_external(f(handle.into())).await;
                             }
                             (UserData::ExternalArc(f), other) => {
-                                let handle = Handle::from_node(
-                                    self.runtime.arena.clone(),
-                                    self.net_handle().await,
-                                    other,
-                                );
+                                let handle = Handle::from_node(self.net_handle(), other);
                                 self.schedule_external((f.0).as_ref()(handle.into())).await;
                             }
                         }

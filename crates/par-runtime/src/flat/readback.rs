@@ -26,7 +26,12 @@ pub(crate) type Result<T> = core::result::Result<T, Error>;
 #[derive(Clone)]
 struct HandleLinker {
     net: NetHandle,
-    arena: Arc<Arena<Linked>>,
+}
+
+impl HandleLinker {
+    fn arena_ref(&self) -> &Arena<Linked> {
+        self.net.arena()
+    }
 }
 
 pub struct Handle {
@@ -50,19 +55,15 @@ impl Handle {
         }
     }
 
-    pub fn from_node(arena: Arc<Arena<Linked>>, net: NetHandle, node: Node<Linked>) -> Self {
+    pub fn from_node(net: NetHandle, node: Node<Linked>) -> Self {
         Self {
-            linker: HandleLinker { arena, net },
+            linker: HandleLinker { net },
             node,
         }
     }
 
-    pub fn from_package(
-        arena: Arc<Arena<Linked>>,
-        net: NetHandle,
-        package: PackagePtr<Linked>,
-    ) -> Result<Handle> {
-        let mut linker = HandleLinker { arena, net };
+    pub fn from_package(net: NetHandle, package: PackagePtr<Linked>) -> Result<Handle> {
+        let mut linker = HandleLinker { net };
         let root = linker.instantiate_package_captures(
             package,
             Node::Linear(Linear::Value(Box::new(Value::Break))),
@@ -86,12 +87,8 @@ impl Handle {
     where
         F: 'static + Send + Future<Output = ()>,
     {
-        self.linker
-            .net
-            .0
-            .clone()
-            .send(ReducerMessage::Spawn(FutureObj::from(Box::new(f(self)))))
-            .unwrap();
+        let net = self.linker.net.clone();
+        net.send(ReducerMessage::Spawn(FutureObj::from(Box::new(f(self)))));
     }
 
     pub async fn await_ready(mut self) -> Self {
@@ -211,19 +208,23 @@ impl Handle {
 
     pub fn signal(&mut self, chosen: ArcStr) {
         let (payload, payload_h) = linked_pair();
-        let chosen = self.linker.arena.interned(&chosen).unwrap_or_else(|| {
-            // This happens when we send a signal that the program doesn't have
-            // and that also isn't present in the types
-            // It might still be handled by an "else" branch then
-            eprintln!(
-                "Attempted to signal a non-interned string: `{}`
+        let chosen = self
+            .linker
+            .arena_ref()
+            .interned(&chosen)
+            .unwrap_or_else(|| {
+                // This happens when we send a signal that the program doesn't have
+                // and that also isn't present in the types
+                // It might still be handled by an "else" branch then
+                eprintln!(
+                    "Attempted to signal a non-interned string: `{}`
                 This is most likely type error with built in definitions.
                 Sending an empty signal instead, which will always trigger an `else` branch.
                 ",
-                chosen
-            );
-            self.linker.arena.empty_string()
-        });
+                    chosen
+                );
+                self.linker.arena_ref().empty_string()
+            });
         let either = Node::Linear(Linear::Value(Box::new(Value::Either(chosen, payload))));
         let choice = core::mem::replace(&mut self.node, payload_h);
         self.linker.link(choice, either);
@@ -239,14 +240,14 @@ impl Handle {
             linker,
             node: payload,
         };
-        self.linker.arena.get_arcstr(name).clone()
+        self.linker.arena_ref().get_arcstr(name).clone()
     }
 
     pub fn break_(mut self) {
         match &self.node {
             Node::Global(_, global_index)
                 if matches!(
-                    self.linker.arena.get(*global_index),
+                    self.linker.arena_ref().get(*global_index),
                     Global::Destruct(GlobalCont::Continue)
                 ) =>
             {
@@ -264,7 +265,7 @@ impl Handle {
         match &self.node {
             Node::Global(_, global_index)
                 if matches!(
-                    self.linker.arena.get(*global_index),
+                    self.linker.arena_ref().get(*global_index),
                     Global::Value(Value::Break)
                 ) =>
             {
@@ -323,16 +324,19 @@ impl Handle {
     }
 
     fn intern_signal(&self, chosen: &ArcStr) -> Index<Linked, str> {
-        self.linker.arena.interned(&chosen).unwrap_or_else(|| {
-            eprintln!(
-                "Attempted to provide non-interned signal data: `{}`
+        self.linker
+            .arena_ref()
+            .interned(&chosen)
+            .unwrap_or_else(|| {
+                eprintln!(
+                    "Attempted to provide non-interned signal data: `{}`
                 This is most likely a type error with built in definitions.
                 Providing an empty signal instead, which will always trigger an `else` branch.
                 ",
-                chosen
-            );
-            self.linker.arena.empty_string()
-        })
+                    chosen
+                );
+                self.linker.arena_ref().empty_string()
+            })
     }
 
     async fn data_from_value(&self, value: Value<Node<Linked>, Linked>) -> Result<Data> {
@@ -346,7 +350,7 @@ impl Handle {
             Value::Either(name, payload) => {
                 let payload = Box::pin(self.new(payload).data()).await?;
                 Ok(Data::Either(
-                    self.linker.arena.get(name).into(),
+                    self.linker.arena_ref().get(name).into(),
                     Box::new(payload),
                 ))
             }
@@ -358,10 +362,10 @@ impl Handle {
 
 impl Linker for HandleLinker {
     fn link(&mut self, a: Node<Linked>, b: Node<Linked>) {
-        self.net.0.send(ReducerMessage::Redex(a, b)).unwrap()
+        self.net.send(ReducerMessage::Redex(a, b))
     }
 
     fn arena(&self) -> Arc<Arena<Linked>> {
-        self.arena.clone()
+        self.net.arena().clone()
     }
 }
