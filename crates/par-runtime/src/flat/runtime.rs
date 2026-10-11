@@ -713,10 +713,127 @@ impl Runtime {
             .find(|(a, _)| a.clone() == variant)
             .map(|(_, b)| b.into())
     }
+    /// Handles the most frequent interactions without going through the general
+    /// match in [`Runtime::interact`]. Each case here must agree with the
+    /// priority order documented there; anything else is handed back.
+    #[inline(always)]
+    fn interact_fast(
+        &mut self,
+        a: Node<Linked>,
+        b: Node<Linked>,
+    ) -> Result<(), (Node<Linked>, Node<Linked>)> {
+        let global = |node: &Node<Linked>| match node {
+            Node::Global(_, index) => Some(self.arena.get(*index)),
+            _ => None,
+        };
+        let is_expand = |g: Option<&Global<Linked>>| {
+            matches!(g, Some(Global::Package(_, _, FanBehavior::Expand)))
+        };
+        let (ga, gb) = (global(&a), global(&b));
+        match (ga, gb) {
+            // (2) Linking variables. Only box-like packages take precedence.
+            (Some(Global::Variable(index)), gb) if !is_expand(gb) => {
+                let index = *index;
+                let Node::Global(instance, _) = a else {
+                    unreachable!()
+                };
+                self.set_var(instance, index, b);
+            }
+            (ga, Some(Global::Variable(index))) if !is_expand(ga) => {
+                let index = *index;
+                let Node::Global(instance, _) = b else {
+                    unreachable!()
+                };
+                self.set_var(instance, index, a);
+            }
+            // (6) Destructuring a global pair with a global par.
+            (
+                Some(Global::Value(Value::Pair(a0, a1))),
+                Some(Global::Destruct(GlobalCont::Par(b0, b1))),
+            ) => {
+                let (a0, a1, b0, b1) = (*a0, *a1, *b0, *b1);
+                let (Node::Global(value_instance, _), Node::Global(par_instance, _)) = (a, b)
+                else {
+                    unreachable!()
+                };
+                self.interact_pair_par(value_instance, a0, a1, par_instance, b0, b1);
+            }
+            (
+                Some(Global::Destruct(GlobalCont::Par(b0, b1))),
+                Some(Global::Value(Value::Pair(a0, a1))),
+            ) => {
+                let (a0, a1, b0, b1) = (*a0, *a1, *b0, *b1);
+                let (Node::Global(par_instance, _), Node::Global(value_instance, _)) = (a, b)
+                else {
+                    unreachable!()
+                };
+                self.interact_pair_par(value_instance, a0, a1, par_instance, b0, b1);
+            }
+            // (3) Fanout of an already shared value.
+            (Some(Global::Fanout(destinations)), None)
+                if matches!(b, Node::Shared(Shared::Sync(_))) =>
+            {
+                let destinations = *destinations;
+                let (Node::Global(instance, _), Node::Shared(shared)) = (a, b) else {
+                    unreachable!()
+                };
+                self.rewrites.fanout += 1;
+                for dest in destinations {
+                    self.redexes.push((
+                        Node::Global(instance.clone(), dest),
+                        Node::Shared(shared.clone()),
+                    ));
+                }
+            }
+            (None, Some(Global::Fanout(destinations)))
+                if matches!(a, Node::Shared(Shared::Sync(_))) =>
+            {
+                let destinations = *destinations;
+                let (Node::Shared(shared), Node::Global(instance, _)) = (a, b) else {
+                    unreachable!()
+                };
+                self.rewrites.fanout += 1;
+                for dest in destinations {
+                    self.redexes.push((
+                        Node::Global(instance.clone(), dest),
+                        Node::Shared(shared.clone()),
+                    ));
+                }
+            }
+            _ => return Err((a, b)),
+        }
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn interact_pair_par(
+        &mut self,
+        value_instance: Instance,
+        a0: GlobalPtr<Linked>,
+        a1: GlobalPtr<Linked>,
+        par_instance: Instance,
+        b0: GlobalPtr<Linked>,
+        b1: GlobalPtr<Linked>,
+    ) {
+        self.rewrites.receive += 1;
+        self.link(
+            Node::Global(value_instance.clone(), a0),
+            Node::Global(par_instance.clone(), b0),
+        );
+        self.link(
+            Node::Global(value_instance, a1),
+            Node::Global(par_instance, b1),
+        );
+    }
+
     /// Carry out an interaction between two nodes.
     /// Returns Some if an external operation with `UserData` was attempted.
     /// and None otherwise
     fn interact(&mut self, a: Node<Linked>, b: Node<Linked>) -> Option<(UserData, Node<Linked>)> {
+        let (a, b) = match self.interact_fast(a, b) {
+            Ok(()) => return None,
+            Err(nodes) => nodes,
+        };
         /// NodeRef is an internal structure to make matching on Nodes easier.
         /// It is like a Node but includes a reference to the Global in the Global branch
         /// to allow matching on it
