@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Par Tasks</title>
+  <style>
+    body { font-family: ui-monospace, monospace; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    input[type=text] { flex: 1; font: inherit; min-width: 0; }
+    h2 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { display: flex; align-items: baseline; gap: .6rem; border: 1px solid #999; padding: .5rem; margin-bottom: .5rem; }
+    li input { flex: none; }
+    .text { flex: 1; min-width: 0; }
+    .title { overflow-wrap: anywhere; }
+    .times { color: #888; font-size: .85em; margin-top: .15rem; }
+    #done .title { text-decoration: line-through; color: #888; }
+    .empty { color: #888; font-style: italic; }
+    #error { color: #b3261e; min-height: 1.2em; margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>⅋ tasks</h1>
+  <form id="add">
+    <input id="title" type="text" placeholder="What needs doing?" autocomplete="off" autofocus required>
+    <button>Add</button>
+  </form>
+  <p id="error"></p>
+
+  <h2>To do</h2>
+  <p class="empty" id="open-empty">Nothing to do.</p>
+  <ul id="open"></ul>
+
+  <h2>Done</h2>
+  <p class="empty" id="done-empty">Nothing done yet.</p>
+  <ul id="done"></ul>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let tasks = [];
+
+    function time(millis) {
+      const date = new Date(millis);
+      const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      if (date.toDateString() === new Date().toDateString()) return clock;
+      return `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}`;
+    }
+
+    function showError(message) {
+      $("error").textContent = message;
+    }
+
+    async function request(method, path, body) {
+      const response = await fetch(path, { method, body });
+      if (!response.ok) {
+        showError(await response.text());
+        return null;
+      }
+      showError("");
+      return response.status === 204 ? true : response.json();
+    }
+
+    // Replaces a task with its new version from the server, or adds it.
+    function update(task) {
+      tasks = tasks.filter((t) => t.id !== task.id).concat([task]);
+      render();
+    }
+
+    function item(task) {
+      const li = document.createElement("li");
+      li.innerHTML = `
+        <input type="checkbox">
+        <div class="text">
+          <div class="title"></div>
+          <div class="times"></div>
+        </div>`;
+      li.querySelector(".title").textContent = task.title;
+      const done = task.completed !== null;
+      li.querySelector(".times").textContent =
+        `added ${time(task.created)}` + (done ? ` · done ${time(task.completed)}` : "");
+
+      const checkbox = li.querySelector("input");
+      checkbox.checked = done;
+      checkbox.onchange = async () => {
+        const action = checkbox.checked ? "complete" : "uncomplete";
+        const updated = await request("POST", `/tasks/${task.id}/${action}`);
+        if (updated) update(updated); else render();
+      };
+
+      if (done) {
+        const button = document.createElement("button");
+        button.textContent = "Delete";
+        button.onclick = async () => {
+          if (await request("DELETE", `/tasks/${task.id}`)) {
+            tasks = tasks.filter((t) => t.id !== task.id);
+            render();
+          }
+        };
+        li.append(button);
+      }
+      return li;
+    }
+
+    // Same order as the server: open tasks oldest first, then completed ones,
+    // most recently completed first.
+    function render() {
+      const open = tasks.filter((t) => t.completed === null).sort((a, b) => a.id - b.id);
+      const done = tasks.filter((t) => t.completed !== null).sort((a, b) => b.completed - a.completed);
+      $("open").replaceChildren(...open.map(item));
+      $("done").replaceChildren(...done.map(item));
+      $("open-empty").hidden = open.length > 0;
+      $("done-empty").hidden = done.length > 0;
+    }
+
+    $("add").onsubmit = async (event) => {
+      event.preventDefault();
+      const added = await request("POST", "/tasks", $("title").value);
+      if (added) {
+        $("title").value = "";
+        update(added);
+      }
+    };
+
+    request("GET", "/tasks").then((loaded) => {
+      if (loaded) {
+        tasks = loaded;
+        render();
+      }
+    });
+  </script>
+</body>
+</html>

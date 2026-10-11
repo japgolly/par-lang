@@ -1,0 +1,115 @@
+module Tasks
+
+import {
+  @basic/Sql
+  @core/Bool
+  @core/Int
+  @core/List
+  @core/Nat
+  @core/Option
+  @core/Stream
+  @core/String
+  @core/Time
+  @core/Try
+}
+
+export {
+  // A task: its id, title, when it was created, and when it was completed,
+  // if it was.
+  type Task = (Int, String, Time.Instant, Option<Time.Instant>)!
+
+  // Connects to the database, and creates the table if it's not there yet.
+  dec Open : [String] Try<Sql.Error, Sql.Database>
+
+  // All tasks: open ones first, oldest first, then completed ones, most
+  // recently completed first.
+  dec All : [Sql.Database] Try<Sql.Error, List<Task>>
+
+  dec Add : [Sql.Database, String] Try<Sql.Error, Task>
+
+  // These answer `.none!` if there's no task with the id.
+  dec Complete : [Sql.Database, Nat] Try<Sql.Error, Option<Task>>
+  dec Uncomplete : [Sql.Database, Nat] Try<Sql.Error, Option<Task>>
+
+  // Only deletes a completed task. Answers `.false!` if there's no completed
+  // task with the id.
+  dec Delete : [Sql.Database, Nat] Try<Sql.Error, Bool>
+}
+
+def Schema = "
+  CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  )
+"
+
+def Columns = "id, title, created_at, completed_at"
+
+def Open = [url] catch e => .err e in do {
+  let try db = Sql.Open(url)
+  let (created) db = db.execute(Schema, *())
+  let try _ = created
+} in .ok db
+
+def All = [db] Query(db, `
+  SELECT ${Columns} FROM tasks
+  ORDER BY completed_at IS NOT NULL, completed_at DESC, id
+`, *())
+
+def Add = [db, title]
+  catch e => .err e in
+  let try added = First(Query(db, `
+    INSERT INTO tasks (title, created_at) VALUES (?, ?)
+    RETURNING ${Columns}
+  `, *(.text title, Sql.Timestamp(Time.Now)))) in added.case {
+    .some task => .ok task,
+    .none! => .err "The database did not return the new task.",
+  }
+
+// Completing an already completed task keeps its original completion time.
+def Complete = [db, id] First(Query(db, `
+  UPDATE tasks SET completed_at = COALESCE(completed_at, ?) WHERE id = ?
+  RETURNING ${Columns}
+`, *(Sql.Timestamp(Time.Now), .int id)))
+
+def Uncomplete = [db, id] First(Query(db, `
+  UPDATE tasks SET completed_at = NULL WHERE id = ?
+  RETURNING ${Columns}
+`, *(.int id)))
+
+def Delete = [db, id]
+  let (deleted) _ = db.execute(
+    "DELETE FROM tasks WHERE id = ? AND completed_at IS NOT NULL",
+    *(.int id),
+  ) in Try.Map(deleted, box [count] count > 0)
+
+dec Query : [Sql.Database, String, List<Sql.Value>] Try<Sql.Error, List<Task>>
+def Query = [db, sql, params] catch e => .err e in do {
+  let (try rows) _ = db.query(sql, params)
+  let try rows = Stream.ToList(rows)
+} in DecodeAll(rows)
+
+dec First : [Try<Sql.Error, List<Task>>] Try<Sql.Error, Option<Task>>
+def First = [result] Try.Map(result, box [tasks] tasks.case {
+  .end! => .none!,
+  .item(task) _ => .some task,
+})
+
+dec DecodeAll : [List<Sql.Row>] Try<Sql.Error, List<Task>>
+def DecodeAll = [rows] rows.begin.case {
+  .end! => .ok .end!,
+  .item(row) rows => catch e => .err e in do {
+    let try task = Decode(row)
+    let try tasks = rows.loop
+  } in .ok .item(task) tasks,
+}
+
+dec Decode : [Sql.Row] Try<Sql.Error, Task>
+def Decode = [row] catch e => .err e in do {
+  let try id = row->Sql.Field("id")->Sql.Decode(Sql.AsInt)
+  let try title = row->Sql.Field("title")->Sql.Decode(Sql.AsText)
+  let try created = row->Sql.Field("created_at")->Sql.Decode(Sql.AsTimestamp)
+  let try completed = row->Sql.Field("completed_at")->Sql.Decode(Sql.Nullable(Sql.AsTimestamp))
+} in .ok (id, title, created, completed)!

@@ -312,4 +312,4 @@ Here's a more involved example of both-ways communication between a server and i
 
 It's an example of client-to-client mediation via a server.
 
-You can find a thoroughly commented code for this toy chat server in the [`examples`](https://github.com/par-team/par-lang/blob/main/examples/src/PlaygroundChat.par) directory.
+You can find a thoroughly commented code for this toy chat server in the [`playground-examples`](https://github.com/par-team/par-lang/blob/main/playground-examples/src/PlaygroundChat.par) directory.

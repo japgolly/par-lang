@@ -455,6 +455,19 @@ impl BytesMachine {
         };
         heap.iter().map(|m2| m2.start).min().or(Some(pos))
     }
+
+    // Whether reading more input could still produce a match that's at least as good as the
+    // one split at `split`: one that splits there or earlier. When it can't, the search can
+    // stop without reading further, which matters for interactive input.
+    pub(super) fn can_improve(&self, split: usize) -> bool {
+        let BytesPattern::Concat(_, p2) = self.pattern.as_ref() else {
+            return true;
+        };
+        let State::Concat(_, heap) = &self.inner.state else {
+            return false;
+        };
+        heap.iter().any(|m2| m2.start <= split && m2.can_grow(p2))
+    }
 }
 
 #[derive(Debug)]
@@ -546,6 +559,40 @@ impl MachineInner {
             (BytesPattern::Repeat1(p), State::Heap(heap)) => {
                 heap.iter().filter_map(|m| m.accepts(p)).max()
             }
+
+            (p, s) => unreachable!("invalid combination of pattern {:?} and state {:?}", p, s),
+        }
+    }
+
+    // Whether this machine may still accept after reading more input. It may answer `true` when
+    // unsure, but never `false` when it could.
+    fn can_grow(&self, pattern: &BytesPattern) -> bool {
+        match (pattern, &self.state) {
+            (_, State::Halt) => false,
+
+            (BytesPattern::All, State::Init) => true,
+
+            (BytesPattern::Empty, State::Init) => false,
+
+            (BytesPattern::Min(_), State::Index(_)) => true,
+            (BytesPattern::Max(n), State::Index(i)) => &BigUint::from(*i) < n,
+
+            (BytesPattern::Bytes(s), State::Index(i)) => *i < s.len(),
+
+            (BytesPattern::One(_), State::Index(i)) => *i == 0,
+            (BytesPattern::Non(_), State::Index(i)) => *i == 0,
+
+            (BytesPattern::Concat(p1, p2), State::Concat(m1, heap)) => {
+                m1.can_grow(p1) || heap.iter().any(|m2| m2.can_grow(p2))
+            }
+
+            (BytesPattern::And(p1, p2), State::Pair(m1, m2)) => m1.can_grow(p1) && m2.can_grow(p2),
+            (BytesPattern::Or(p1, p2), State::Pair(m1, m2)) => m1.can_grow(p1) || m2.can_grow(p2),
+
+            (BytesPattern::Repeat(_), State::Init) => true,
+            (BytesPattern::Repeat(p) | BytesPattern::Repeat1(p), State::Heap(heap)) => heap
+                .iter()
+                .any(|m| m.can_grow(p) || m.accepts(p) == Some(true)),
 
             (p, s) => unreachable!("invalid combination of pattern {:?} and state {:?}", p, s),
         }

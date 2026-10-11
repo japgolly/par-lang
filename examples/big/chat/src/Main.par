@@ -1,0 +1,80 @@
+module Main
+
+import {
+  @basic/Http
+  @core/Bytes
+  @core/Debug
+  @core/List
+  @core/String
+  @core/Url
+  Room
+}
+
+def Address = "127.0.0.1:3000"
+def Page = include("static/index.html")
+
+def Main : ! = do {
+  Debug.Log(`Chat is running at http://${Address}`)
+} in Room.Serve(Accept(Address))
+
+// The room's controller: serves the page directly, hands every WebSocket
+// over as a new user, and shuts the room down when the listener stops.
+dec Accept : [String] Room.Controller
+def Accept = [address] chan room {
+  let requests = Http.Listen(address)
+  requests.begin.case {
+    .shutdown result => {
+      if result is .err error => {
+        Debug.Log(`Listener stopped: ${error}`)
+      }
+      room.shutdown!
+    }
+
+    .incoming(request, respond) => {
+      let (_, url, _) _ = request
+      if {
+        url.path == "/ws" => {
+          room.enter(Session(Name(url), respond))
+        }
+        url.path == "/" => {
+          respond.http((200, *(("Content-Type") "text/html; charset=utf-8")) Bytes.Reader(Page))
+        }
+        else => {
+          respond.http((404, *()) Bytes.Reader("Not found"))
+        }
+      }
+      requests.loop
+    }
+  }
+}
+
+dec Session : [String, Http.Respond] Room.User
+def Session = [name, respond] chan room {
+  catch _ => { room.failed! }
+  let try (reader) writer = respond.webSocket
+  room.join(name, Room.Outbox(writer))
+  room.case {
+    .accept(_) => {}
+    .reject* => { room! }
+  }
+
+  catch _ => { room.leave! }
+  reader.begin.read.try.case {
+    .end! => { room.leave! }
+    .message(message) => {
+      message.case {
+        .text text => { room.say(text) }
+        .binary _ => {}
+      }
+      reader.loop
+    }
+  }
+}
+
+dec Name : [Url] String
+def Name = [url]
+  let found = List.Find(url.query, box [(key) _] key == "name") in
+  if {
+    found is .some(_) name and String.Trim(name) != "" => String.Trim(name),
+    else => "anonymous",
+  }

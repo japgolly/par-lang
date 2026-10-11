@@ -1,0 +1,275 @@
+module Main
+
+import {
+  @basic/Http
+  @basic/Os
+  @core/Bool
+  @core/BoxMap
+  @core/Bytes
+  @core/Debug
+  @core/Float
+  @core/Int
+  @core/Json
+  @core/List
+  @core/Nat
+  @core/Option
+  @core/String
+  @core/Time
+  @core/Try
+  @core/Url
+  Tracker
+}
+
+def Address = "127.0.0.1:3000"
+def Page = include("static/index.html")
+
+dec Root : Os.Path
+def Root = Os.Path(".").append("Downloads")
+
+def Main : ! = chan exit {
+  catch error => {
+    Debug.Log(`Cannot create the downloads directory: ${error}`)
+    exit!
+  }
+  let try ! = Os.CreateDir(Root)
+  Debug.Log(`Downloader is running at http://${Address}`)
+  exit <> Tracker.Serve(Control(Address, Root))
+}
+
+// The tracker's controller: turns HTTP requests into downloads, cancellations
+// and viewers, and shuts the tracker down when the listener stops.
+dec Control : [String, Os.Path] Tracker.Controller
+def Control = [address, root] chan tracker {
+  let requests = Http.Listen(address)
+  requests.begin.case {
+    .shutdown result => {
+      if result is .err error => {
+        Debug.Log(`Listener stopped: ${error}`)
+      }
+      Debug.Log("Shutting down, cancelling all downloads...")
+      tracker.shutdown!
+    }
+
+    .incoming(request, respond) => {
+      let (method, url, _) body = request
+      catch error => {
+        respond.http((400, *()) Bytes.Reader(error))
+        requests.loop
+      }
+
+      Route(method, url.path).case {
+        .page! => {
+          respond.http((200, *(("Content-Type") "text/html; charset=utf-8")) Bytes.Reader(Page))
+        }
+
+        .watch! => {
+          tracker.watch(Viewer(respond))
+        }
+
+        .start name => {
+          let try source = body
+            ->String.ReadAll
+            ->Try.FlatMap(box [text] Url.FromString(String.Trim(text)))
+          tracker.start(name, Download(source, root.append(name)))[started]
+          if {
+            started => {
+              respond.http((202, *()) Bytes.EmptyReader)
+            }
+            else => {
+              respond.http((409, *()) Bytes.Reader(`${name} is already downloading.`))
+            }
+          }
+        }
+
+        .cancel name => {
+          tracker.cancel(name)[found]
+          if {
+            found => {
+              respond.http((200, *()) Bytes.EmptyReader)
+            }
+            else => {
+              respond.http((404, *()) Bytes.Reader(`${name} is not downloading.`))
+            }
+          }
+        }
+
+        .reject(status, message)! => {
+          respond.http((status, *()) Bytes.Reader(message))
+        }
+      }
+      requests.loop
+    }
+  }
+}
+
+// A viewer behind a WebSocket. Each push answers right away, from how the
+// previous send went, so a slow browser never holds up the tracker.
+dec Viewer : [Http.Respond] Tracker.Viewer
+def Viewer = [respond]
+  let conn = respond.webSocket
+    ->Try.ToOption
+    ->Option.Map(box [(_) writer] writer)  // we never read from the browser
+  in begin case {
+    .close* => !,
+    .push(notice) => conn.case {
+      .none! => .none!,
+      .some writer =>
+        let conn = writer.send(.text Encode(notice))->Try.ToOption
+        in .some loop,
+    },
+  }
+
+// Downloads a URL into a file. Nothing happens until the first pull.
+dec Download : [Url, Os.Path] Tracker.Download
+def Download = [source, path] case {
+  .close* => !,
+  .next => chan yield {
+    catch error => {
+      yield <> .end.err error
+    }
+
+    let try (status, headers) body = Http.Fetch(("GET", source, *()) Bytes.EmptyReader)
+    if status != 200 => {
+      throw `The server responded with status #{status}.`
+    }
+    let try file = Os.CreateNewFile(path)
+    yield.item(.started ExpectedSize(headers))
+    yield <> Transfer(body, file, path)
+  }
+}
+
+// The rest of a download, once the file is created. Each pull copies chunks
+// for about 100 milliseconds, then reports how many bytes it copied. A
+// cancelled or failed download deletes its file.
+dec Transfer : [Bytes.Reader<Http.Error>, Os.Writer, Os.Path] Tracker.Download
+def Transfer = [body, file, path] chan yield {
+  // Here the file is still open, so it's closed before it's deleted.
+  catch@open error => {
+    let ! = Discard(file, path)
+    yield <> .end.err error
+  }
+  // Here the failed operation already used the file up.
+  catch error => {
+    let _ = Os.RemoveFile(path)
+    yield <> .end.err error
+  }
+
+  yield.case {
+    .close* => {
+      let ! = Discard(file, path)
+      yield!
+    }
+    .next => {}
+  }
+
+  let batch = 0
+  let since = Time.Now
+  body.begin.read.try@open.case {
+    .end! => {
+      file.close.try
+      yield.item(.progressed batch)
+      yield.case {
+        .close* => {
+          let _ = Os.RemoveFile(path)
+          yield!
+        }
+        .next => {
+          yield.end.ok!
+        }
+      }
+    }
+
+    .chunk(bytes) => {
+      file.write(bytes).try
+      batch += Bytes.Length(bytes)
+      if Time.Now->Time.Since(since) >= 100 * Time.Millisecond => {
+        yield.item(.progressed batch)
+        yield.case {
+          .close* => {
+            let ! = Discard(file, path)
+            yield!
+          }
+          .next => {}
+        }
+        let batch = 0
+        let since = Time.Now
+      }
+      body.loop
+    }
+  }
+}
+
+// Closes a file, then deletes it. Only a decision makes a process wait, so
+// the `.case` is what keeps the deletion from starting before the close is
+// done.
+dec Discard : [Os.Writer, Os.Path] !
+def Discard = [file, path] do {
+  file.close.case {
+    .err _ => {}
+    .ok! => {}
+  }
+  let _ = Os.RemoveFile(path)
+} in !
+
+dec ExpectedSize : [List<(String) Bytes>] Nat
+def ExpectedSize = [headers]
+  BoxMap.FromList(headers).get("content-length")
+    ->Option.Map(box String.FromBytes)
+    ->Option.FlatMap(box Nat.FromString)
+    .default(0)
+
+// Where a request is going. A download name must be a plain file name, so
+// no request can write outside the downloads directory.
+type Route = either {
+  .page!,
+  .watch!,
+  .start String,
+  .cancel String,
+  .reject(Nat, String)!,
+}
+
+dec Route : [String, String] Route
+def Route = [method, path] if {
+  path == "/" => .page!,
+  path == "/ws" => .watch!,
+
+  String.StartsWith(path, .str "/downloads/") => let name = String.TrimLeft(path, .str "/downloads/") in if {
+    not IsFileName(name) => .reject(400, "Invalid download name.")!,
+    method == "POST" => .start name,
+    method == "DELETE" => .cancel name,
+    else => .reject(405, "Method not allowed.")!,
+  },
+
+  else => .reject(404, "Not found.")!,
+}
+
+dec IsFileName : [String] Bool
+def IsFileName = [name] if {
+  name == "" or name == "." or name == ".." => .false!,
+  String.Find(name, .or *(.str "/", .str "\\")) is .some _ => .false!,
+  else => .true!,
+}
+
+// Notices go to the browser as JSON objects with a `kind` and a `name`.
+dec Encode : [Tracker.Notice] String
+def Encode = [notice] notice.case {
+  .added name => Message("added", name, *()),
+  .started(name, size)! => Message("started", name, *(("size") Number(size))),
+  .progressed(name, downloaded)! => Message("progressed", name, *(("downloaded") Number(downloaded))),
+  .finished(name, size, duration)! => Message("finished", name, *(
+    ("size") Number(size),
+    ("millis") Number(duration / Time.Millisecond),
+  )),
+  .failed(name, error)! => Message("failed", name, *(("error") .string error)),
+  .cancelled name => Message("cancelled", name, *()),
+}
+
+dec Message : [String, String, List<(String) Json>] String
+def Message = [kind, name, fields] Json.Encode(.object BoxMap.FromList(
+  .item(("kind") .string kind)
+  .item(("name") .string name)
+  fields
+))
+
+dec Number : [Int] Json
+def Number = [n] .number Float.FromInt(n)

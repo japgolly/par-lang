@@ -3800,24 +3800,24 @@ mod test {
     fn test_parse_examples() {
         let input = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/src/HelloWorld.par"
+            "/../../examples/small/src/HelloWorld.par"
         ));
         assert!(parse_module(input, "HelloWorld.par".into()).is_ok());
         let input = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/src/Fibonacci.par"
+            "/../../examples/small/src/Fibonacci.par"
         ));
         assert!(parse_module(input, "Fibonacci.par".into()).is_ok());
         let input = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/src/RockPaperScissors.par"
+            "/../../playground-examples/src/RockPaperScissors.par"
         ));
         assert!(parse_module(input, "RockPaperScissors.par".into()).is_ok());
         let input = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/src/StringManipulation.par"
+            "/../../examples/small/src/Queue.par"
         ));
-        assert!(parse_module(input, "StringManipulation.par".into()).is_ok());
+        assert!(parse_module(input, "Queue.par".into()).is_ok());
         let input = "begin the errors";
         assert!(parse_module(input, "error.par".into()).is_err());
     }
@@ -4230,7 +4230,7 @@ def Value = [x] (x) loop
     fn test_parse_deduplicate_example() {
         let input = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/src/Deduplicate.par"
+            "/../../examples/small/src/Deduplicate.par"
         ));
         assert!(parse_module(input, "Deduplicate.par".into()).is_ok());
     }

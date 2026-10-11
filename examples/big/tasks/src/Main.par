@@ -1,0 +1,177 @@
+module Main
+
+import {
+  @basic/Http
+  @basic/Sql
+  @core/Bool
+  @core/BoxMap
+  @core/Bytes
+  @core/Debug
+  @core/Float
+  @core/Int
+  @core/Json
+  @core/List
+  @core/Nat
+  @core/Option
+  @core/String
+  @core/Time
+  Tasks
+}
+
+def Address = "127.0.0.1:3000"
+def DatabaseUrl = "sqlite://tasks.db?mode=rwc"
+def Page = include("static/index.html")
+
+// Every request gets its own handler, with its own handle to the database, so
+// requests are served concurrently. The program ends once the listener stops
+// and every handler is done.
+def Main : ! = chan exit {
+  catch error => {
+    Debug.Log(`Cannot open the database: ${error}`)
+    exit!
+  }
+  let try db = Tasks.Open(DatabaseUrl)
+  Debug.Log(`Tasks are running at http://${Address}`)
+
+  let requests = Http.Listen(Address)
+  requests.begin.case {
+    .shutdown result => {
+      if result is .err error => {
+        Debug.Log(`Listener stopped: ${error}`)
+      }
+      exit!
+    }
+
+    .incoming(request, respond) => {
+      db.split[handle]
+      let ! = Handle(handle, request, respond)
+      requests.loop
+    }
+  }
+}
+
+dec Handle : [Sql.Database, Http.Request, Http.Respond] !
+def Handle = [db, request, respond] chan exit {
+  let (method, url, _) body = request
+  catch error => {
+    Debug.Log(`Database error: ${error}`)
+    respond.http(Text(500, error))
+    exit!
+  }
+  catch@request error => {
+    respond.http(Text(400, error))
+    exit!
+  }
+
+  Route(method, url.path).case {
+    .page! => {
+      respond.http((200, *(("Content-Type") "text/html; charset=utf-8")) Bytes.Reader(Page))
+    }
+
+    .list! => {
+      let try tasks = Tasks.All(db)
+      respond.http(JsonResponse(200, .list List.Map(tasks, box Encode)))
+    }
+
+    .add! => {
+      let try@request title = String.ReadAll(body)
+      let title = String.Trim(title)
+      if title == "" => {
+        throw@request "A task needs a title."
+      }
+      let try task = Tasks.Add(db, title)
+      respond.http(JsonResponse(201, Encode(task)))
+    }
+
+    .complete id => {
+      let try found = Tasks.Complete(db, id)
+      respond.http(Found(found))
+    }
+
+    .uncomplete id => {
+      let try found = Tasks.Uncomplete(db, id)
+      respond.http(Found(found))
+    }
+
+    .delete id => {
+      let try deleted = Tasks.Delete(db, id)
+      if {
+        deleted => { respond.http((204, *()) Bytes.EmptyReader) }
+        else => { respond.http(Text(404, "No completed task with this id.")) }
+      }
+    }
+
+    .reject(status, message)! => {
+      respond.http(Text(status, message))
+    }
+  }
+  exit!
+}
+
+// Where a request is going.
+type Route = either {
+  .page!,
+  .list!,
+  .add!,
+  .complete Nat,
+  .uncomplete Nat,
+  .delete Nat,
+  .reject(Nat, String)!,
+}
+
+dec Route : [String, String] Route
+def Route = [method, path] if {
+  path == "/" => .page!,
+
+  path == "/tasks" => if {
+    method == "GET" => .list!,
+    method == "POST" => .add!,
+    else => .reject(405, "Method not allowed.")!,
+  },
+
+  String.StartsWith(path, .str "/tasks/") => let rest = String.TrimLeft(path, .str "/tasks/") in if {
+    // /tasks/<id>/complete and /tasks/<id>/uncomplete
+    String.FindAndSplit(rest, .str "/") is .some(idText, _, action)!
+      and Nat.FromString(idText) is .some id
+      and method == "POST" => if {
+        action == "complete" => .complete id,
+        action == "uncomplete" => .uncomplete id,
+        else => .reject(404, "Not found.")!,
+      },
+
+    // /tasks/<id>
+    Nat.FromString(rest) is .some id and method == "DELETE" => .delete id,
+
+    else => .reject(404, "Not found.")!,
+  },
+
+  else => .reject(404, "Not found.")!,
+}
+
+dec Found : [Option<Tasks.Task>] Http.Response
+def Found = [found] found.case {
+  .some task => JsonResponse(200, Encode(task)),
+  .none! => Text(404, "No task with this id."),
+}
+
+dec Text : [Nat, String] Http.Response
+def Text = [status, text] (status, *()) Bytes.Reader(text)
+
+dec JsonResponse : [Nat, Json] Http.Response
+def JsonResponse = [status, json]
+  (status, *(("Content-Type") "application/json")) Bytes.Reader(Json.Encode(json))
+
+// Times go to the browser as milliseconds since the Unix epoch.
+dec Encode : [Tasks.Task] Json
+def Encode = [(id, title, created, completed)!] .object BoxMap.FromList(*(
+  ("id") .number Float.FromInt(id),
+  ("title") .string title,
+  ("created") Millis(created),
+  ("completed") completed.case {
+    .none! => .null!,
+    .some at => Millis(at),
+  },
+))
+
+dec Millis : [Time.Instant] Json
+def Millis = [instant] .number Float.FromInt(instant.unixNanos / 1_000_000)

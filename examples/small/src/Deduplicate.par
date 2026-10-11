@@ -1,0 +1,66 @@
+module Deduplicate
+
+import {
+  @core/Bool
+  @core/Int
+  @core/List
+  @core/Nat
+  @core/String
+  @basic/Console
+}
+
+// An interface to sets of `a`s, which hides how the sets are represented.
+//
+// `(type set: share)` makes this an existential type. Whoever creates a
+// `SetModule` chooses what `set` really is. Its users only learn that sets can
+// be shared, so they can't look inside a set; all they can do is pass it to
+// these operations. The operations are boxed, so they can be used any number of
+// times.
+type SetModule<a> = (type set: share) box choice {
+  .empty => set,
+  .insert(a, set) => set,
+  .contains(a, set) => Bool,
+}
+
+// A simple implementation, storing a set as a list. The `(type List<a>)` at
+// the start is where it chooses the hidden type. It needs `a: data` to compare
+// items with `==`.
+dec ListSet : [type a: data] SetModule<a>
+def ListSet = [type a: data] (type List<a>) box case {
+  .empty => .end!,
+
+  .insert(x, set) => .item(x) set,
+
+  .contains(y, set) => set.begin.case {
+    .end! => .false!,
+    .item(x) xs => {x == y}.case {
+      .true! => .true!,
+      .false! => xs.loop,
+    },
+  },
+}
+
+// Removes repeated items from a list, keeping the first of each. It works with
+// any `SetModule`. Unpacking it with `(type set: share) mSet` gives the hidden
+// type a local name, `set`, but reveals nothing more about it.
+dec Deduplicate : [type a: data, SetModule<a>, List<a>] List<a>
+def Deduplicate = [type a: data, (type set: share) mSet, list]
+  let visited = mSet.empty
+  in list.begin.case {
+    .end! => .end!,
+    .item(x) xs => mSet.contains(x, visited).case {
+      .true! => xs.loop,
+      .false! =>
+        let visited = mSet.insert(x, visited)
+        in .item(x) xs.loop,
+    }
+  }
+
+def Main: ! = do {
+  // The last digits of the squares of 1 to 20.
+  let numbers = List.Map(Nat.Range(1, 21), box [n] Int.Mod(n * n, 10))
+  let show = box [list: List<Nat>] String.Join(List.Map(list, box [n] `#{n}`), " ")
+} in Console.Open
+  .print(`Numbers:      ${show(numbers)}`)
+  .print(`Deduplicated: ${show(Deduplicate(type Nat, ListSet(type Nat), numbers))}`)
+  .close

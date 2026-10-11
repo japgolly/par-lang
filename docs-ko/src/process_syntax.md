@@ -19,7 +19,7 @@
 
 한편 프로세스와 명령은 지금까지 어느 정도 감추어져 있었다. Par에 항상 있던 개념이지만, 눈에는 보이지 않았을 것이다! 생성이든 소멸이든 모든 식은 항상 명령으로 이루어진 프로세스로 컴파일된다.
 
-직접 확인해볼 수도 있다! 아무 Par 프로그램, 여기서는 `examples/src/HelloWorld.par`를 열어 보자.
+직접 확인해볼 수도 있다! 아무 Par 프로그램, 여기서는 `examples/small/src/HelloWorld.par`를 열어 보자.
 
 ```par
 module HelloWorld

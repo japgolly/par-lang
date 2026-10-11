@@ -51,7 +51,11 @@ jobs:
 
       # Using ${{ matrix.bin_name }} handles the .exe extension on Windows
       - name: Binary tests - Check
-        run: ./target/release/${{ matrix.bin_name }} check examples/*.par
+        shell: bash
+        run: |
+          for package in examples/small examples/big/*/; do
+            ./target/release/${{ matrix.bin_name }} check --package "$package"
+          done
       
       - name: Binary tests - Test
         run: cd tests && ../target/release/${{ matrix.bin_name }} test      

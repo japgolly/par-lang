@@ -312,4 +312,4 @@ def Main: ! = do {
 
 서버를 통해 클라이언트가 서로 통신하는 과정을 확인할 수 있다.
 
-프로젝트의 [`examples`](https://github.com/par-team/par-lang/blob/main/examples/src/PlaygroundChat.par) 디렉토리에서 꼼꼼하게 주석을 남긴 토이 채팅 서버의 코드를 확인할 수 있다.
+프로젝트의 [`playground-examples`](https://github.com/par-team/par-lang/blob/main/playground-examples/src/PlaygroundChat.par) 디렉토리에서 꼼꼼하게 주석을 남긴 토이 채팅 서버의 코드를 확인할 수 있다.
