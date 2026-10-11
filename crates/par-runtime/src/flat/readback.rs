@@ -365,7 +365,7 @@ impl Linker for HandleLinker {
         self.net.send(ReducerMessage::Redex(a, b))
     }
 
-    fn arena(&self) -> Arc<Arena<Linked>> {
-        self.net.arena().clone()
+    fn arena(&self) -> &Arc<Arena<Linked>> {
+        self.net.arena()
     }
 }

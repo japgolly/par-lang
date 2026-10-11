@@ -156,7 +156,7 @@ impl Debug for Slot {
 ///
 /// ## Lifetime of an `Instance`
 ///
-/// They are created empty by `Linker::create_package_instance`, with a fixed length. Initially, all variables are empty.
+/// They are created empty by `Instance::new`, with a fixed length. Initially, all variables are empty.
 /// Then, calls to `Runtime::set_var` slowly fill up and empty the instance. Each variable slot is filled once and taken out of once.
 /// (I'm not sure if it's possible for a variable slot to never be used, but it definitely can't be linked to twice)
 /// At the end of the lifetime of Instances, all of them go out of scope and are eventually dropped. Because of the way
@@ -166,6 +166,12 @@ pub struct Instance {
 }
 
 impl Instance {
+    fn new(num_vars: usize) -> Self {
+        Instance {
+            vars: Arc::new(InstanceInner((0..num_vars).map(|_| Slot::new()).collect())),
+        }
+    }
+
     fn identifier(&self) -> usize {
         (Arc::as_ptr(&self.vars) as usize >> 3) & 0xFF
     }
@@ -435,11 +441,10 @@ pub struct Runtime {
 /// [`Handle`], which are the two implementors of this trait.
 pub(crate) trait Linker {
     fn link(&mut self, a: Node<Linked>, b: Node<Linked>);
-    fn arena(&self) -> Arc<Arena<Linked>>;
+    fn arena(&self) -> &Arc<Arena<Linked>>;
 
     fn show<'a, 'b>(&'b self, node: &'a Node<Linked>) -> String {
-        let arena_ref = self.arena();
-        format!("{}", Showable(node, &mut Shower::from_arena(&arena_ref)))
+        format!("{}", Showable(node, &mut Shower::from_arena(self.arena())))
     }
     fn destruct(
         &mut self,
@@ -521,53 +526,33 @@ pub(crate) trait Linker {
     }
 
     // Package-related methods
-    fn create_package_instance(&mut self, package: &Package<Linked>) -> Instance {
-        let num_vars = package.num_vars;
-        Instance {
-            vars: Arc::new(InstanceInner((0..num_vars).map(|_| Slot::new()).collect())),
-        }
-    }
-
     fn instatiate_linked_package_body(
         &mut self,
         instance: Instance,
         body: LinkedPackageBody,
     ) -> (Node<Linked>, Node<Linked>) {
-        self.arena().get(body.redexes).iter().for_each(|(a, b)| {
+        for redex in body.redexes {
+            let (a, b) = *self.arena().get(redex);
             self.link(
-                Node::Global(instance.clone(), *a),
-                Node::Global(instance.clone(), *b),
+                Node::Global(instance.clone(), a),
+                Node::Global(instance.clone(), b),
             );
-        });
+        }
         (
             Node::Global(instance.clone(), body.root),
-            Node::Global(instance.clone(), body.captures),
+            Node::Global(instance, body.captures),
         )
-    }
-    fn instantiate_package_captures_direct(
-        &mut self,
-        package: &Package<Linked>,
-        captures: Node<Linked>,
-    ) -> Node<Linked> {
-        let instance = self.create_package_instance(package);
-        self.instantiate_package_body_captures(instance, &package.body, captures)
     }
     fn instantiate_package_captures(
         &mut self,
         package: Index<Linked, OnceLock<Package<Linked>>>,
         captures: Node<Linked>,
     ) -> Node<Linked> {
-        let arena = self.arena();
-        let package = arena.get(package).get().unwrap();
-        self.instantiate_package_captures_direct(package, captures)
-    }
-    fn instantiate_package_body_captures(
-        &mut self,
-        instance: Instance,
-        package: &PackageBody<Linked>,
-        captures: Node<Linked>,
-    ) -> Node<Linked> {
-        self.instantiate_linked_package_body_captures(instance, package.into(), captures)
+        let package = self.arena().get(package).get().unwrap();
+        let num_vars = package.num_vars;
+        let body = LinkedPackageBody::from(&package.body);
+        let instance = Instance::new(num_vars);
+        self.instantiate_linked_package_body_captures(instance, body, captures)
     }
     fn instantiate_linked_package_body_captures(
         &mut self,
@@ -620,8 +605,8 @@ impl Linker for Runtime {
     fn link(&mut self, a: Node<Linked>, b: Node<Linked>) {
         self.redexes.push((a, b));
     }
-    fn arena(&self) -> Arc<Arena<Linked>> {
-        self.arena.clone()
+    fn arena(&self) -> &Arc<Arena<Linked>> {
+        &self.arena
     }
 }
 
@@ -691,7 +676,7 @@ impl Runtime {
         match node {
             Node::Empty => unreachable!(),
             Node::Shared(shared) => Some(shared),
-            Node::Global(instance, global_index) => match self.arena().get(global_index) {
+            Node::Global(instance, global_index) => match self.arena().clone().get(global_index) {
                 Global::Destruct(..) => None,
                 Global::Fanout(..) => None,
                 Global::Close { .. } => None,
@@ -795,17 +780,21 @@ impl Runtime {
     ) -> Option<Redex> {
         self.rewrites.fanout += 1;
         let other = self.share(other).unwrap();
-        let mut last = None;
-        for dest in destinations {
-            let redex = (
+        let Index((start, len)) = destinations;
+        if len == 0 {
+            return None;
+        }
+        let init: Index<Linked, [Global<Linked>]> = Index((start, len - 1));
+        for dest in init {
+            self.redexes.push((
                 Node::Global(instance.clone(), dest),
                 Node::Shared(other.clone()),
-            );
-            if let Some(previous) = last.replace(redex) {
-                self.redexes.push(previous);
-            }
+            ));
         }
-        last
+        Some((
+            Node::Global(instance, Index(start + len - 1)),
+            Node::Shared(other),
+        ))
     }
     fn interact_instantiate(
         &mut self,
