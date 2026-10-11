@@ -144,30 +144,48 @@ impl<'a> AsyncCharIterator for ReaderRemainderCharIterator<'a> {
     type Err = Handle;
 
     async fn next(&mut self) -> Result<Option<(usize, usize, char)>, Self::Err> {
-        loop {
-            while self.tmp.len() < 4 {
-                match self.bytes.next().await? {
-                    Some((_, b)) => self.tmp.push(b),
-                    None => break,
-                }
+        // Read only the bytes of the next character, never past it. On an interactive reader,
+        // reading ahead would wait for input that may not come until the user types more.
+        if self.tmp.is_empty() {
+            match self.bytes.next().await? {
+                Some((_, b)) => self.tmp.push(b),
+                None => return Ok(None),
             }
-            if self.tmp.is_empty() {
-                return Ok(None);
-            }
-            let pos = self.bytes.index - self.tmp.len();
-            for len in 1..=self.tmp.len() {
-                if let Ok(s) = std::str::from_utf8(&self.tmp[..len]) {
-                    if let Some(c) = s.chars().next() {
-                        self.tmp.drain(..len);
-                        return Ok(Some((pos, len, c)));
-                    }
-                }
-            }
-            // Invalid UTF-8 prefix; consume one byte and return replacement char
-            self.tmp.remove(0);
-            return Ok(Some((pos, 1, char::REPLACEMENT_CHARACTER)));
         }
+        let width = utf8_width(self.tmp[0]);
+        while self.tmp.len() < width && self.tmp[1..].iter().all(|b| is_utf8_continuation(*b)) {
+            match self.bytes.next().await? {
+                Some((_, b)) => self.tmp.push(b),
+                None => break,
+            }
+        }
+        let pos = self.bytes.index - self.tmp.len();
+        if let Ok(s) = std::str::from_utf8(&self.tmp[..width.min(self.tmp.len())]) {
+            if let Some(c) = s.chars().next() {
+                self.tmp.drain(..width);
+                return Ok(Some((pos, width, c)));
+            }
+        }
+        // Invalid UTF-8; consume one byte and return replacement char
+        self.tmp.remove(0);
+        Ok(Some((pos, 1, char::REPLACEMENT_CHARACTER)))
     }
+}
+
+// The length of a UTF-8 encoded character, judging by its first byte. Bytes that can't start a
+// character count as 1, so that they're replaced on their own.
+fn utf8_width(first: u8) -> usize {
+    match first {
+        0x00..=0x7F => 1,
+        0xC2..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF4 => 4,
+        _ => 1,
+    }
+}
+
+fn is_utf8_continuation(b: u8) -> bool {
+    b & 0xC0 == 0x80
 }
 
 impl BytesRemainder for ReaderRemainder {
@@ -459,6 +477,12 @@ pub(super) async fn provide_bytes_parser<R: BytesRemainder>(mut handle: Handle, 
                         let mut best_match = None;
                         let mut bytes = remainder.bytes();
                         loop {
+                            // Don't wait for more input once it can't give a better match.
+                            if let Some((bi, _)) = best_match {
+                                if !m.can_improve(bi) {
+                                    break;
+                                }
+                            }
                             let (pos, b) = match bytes.next().await {
                                 Ok(Some((pos, b))) => (pos, b),
                                 Ok(None) => break,
@@ -647,6 +671,12 @@ pub(super) async fn provide_string_parser<R: CharsRemainder>(mut handle: Handle,
                         let mut best_match = None;
                         let mut chars = remainder.chars();
                         loop {
+                            // Don't wait for more input once it can't give a better match.
+                            if let Some((bi, _)) = best_match {
+                                if !m.can_improve(bi) {
+                                    break;
+                                }
+                            }
                             let (pos, len, ch) = match chars.next().await {
                                 Ok(Some((pos, len, ch))) => (pos, len, ch),
                                 Ok(None) => break,

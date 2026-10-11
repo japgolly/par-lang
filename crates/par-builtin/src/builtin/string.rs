@@ -217,6 +217,19 @@ impl StringMachine {
         };
         heap.iter().map(|m2| m2.start).min().or(Some(pos))
     }
+
+    // Whether reading more input could still produce a match that's at least as good as the
+    // one split at `split`: one that splits there or earlier. When it can't, the search can
+    // stop without reading further, which matters for interactive input.
+    pub(super) fn can_improve(&self, split: usize) -> bool {
+        let StringPattern::Concat(_, p2) = self.pattern.as_ref() else {
+            return true;
+        };
+        let State::Concat(_, heap) = &self.inner.state else {
+            return false;
+        };
+        heap.iter().any(|m2| m2.start <= split && m2.can_grow(p2))
+    }
 }
 
 #[derive(Debug)]
@@ -308,6 +321,40 @@ impl MachineInner {
             (StringPattern::Repeat1(p), State::Heap(heap)) => {
                 heap.iter().filter_map(|m| m.accepts(p)).max()
             }
+
+            (p, s) => unreachable!("invalid combination of pattern {:?} and state {:?}", p, s),
+        }
+    }
+
+    // Whether this machine may still accept after reading more input. It may answer `true` when
+    // unsure, but never `false` when it could.
+    fn can_grow(&self, pattern: &StringPattern) -> bool {
+        match (pattern, &self.state) {
+            (_, State::Halt) => false,
+
+            (StringPattern::All, State::Init) => true,
+
+            (StringPattern::Empty, State::Init) => false,
+
+            (StringPattern::Min(_), State::Index(_)) => true,
+            (StringPattern::Max(n), State::Index(i)) => &BigUint::from(*i) < n,
+
+            (StringPattern::Str(s), State::Index(i)) => *i < s.as_str().len(),
+
+            (StringPattern::One(_), State::Index(i)) => *i == 0,
+            (StringPattern::Non(_), State::Index(i)) => *i == 0,
+
+            (StringPattern::Concat(p1, p2), State::Concat(m1, heap)) => {
+                m1.can_grow(p1) || heap.iter().any(|m2| m2.can_grow(p2))
+            }
+
+            (StringPattern::And(p1, p2), State::Pair(m1, m2)) => m1.can_grow(p1) && m2.can_grow(p2),
+            (StringPattern::Or(p1, p2), State::Pair(m1, m2)) => m1.can_grow(p1) || m2.can_grow(p2),
+
+            (StringPattern::Repeat(_), State::Init) => true,
+            (StringPattern::Repeat(p) | StringPattern::Repeat1(p), State::Heap(heap)) => heap
+                .iter()
+                .any(|m| m.can_grow(p) || m.accepts(p) == Some(true)),
 
             (p, s) => unreachable!("invalid combination of pattern {:?} and state {:?}", p, s),
         }
