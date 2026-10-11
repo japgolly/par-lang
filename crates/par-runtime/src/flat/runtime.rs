@@ -35,15 +35,12 @@ use crate::flat::show::Shower;
 use crate::primitive::Primitive;
 
 use super::arena::*;
+use super::lock::SpinLock;
 use crate::fan_behavior::FanBehavior;
 use crate::flat::stats::Rewrites;
 use crate::linker::Linked;
 use serde::{Deserialize, Serialize};
-use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering::{Acquire, Release};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::oneshot::Sender;
 
 pub type PackagePtr<Ext> = Index<Ext, OnceLock<Package<Ext>>>;
@@ -52,95 +49,43 @@ type Redex = (Node<Linked>, Node<Linked>);
 type Str<Ext> = Index<Ext, str>;
 
 #[derive(Debug)]
-struct InstanceInner(Box<[Slot]>);
+struct InstanceInner(Box<[Slot<Linked>]>);
 
-const SLOT_EMPTY: u8 = 0;
-const SLOT_FULL: u8 = 1;
-const SLOT_BUSY: u8 = 2;
-
-/// A variable slot of an [`Instance`], storing its node inline.
+/// A place for a single node, which can be filled and emptied concurrently.
 ///
-/// Slots are filled by the reducer, but external handles may concurrently take
-/// nodes out of them (see [`Linker::deref`]). The `state` acts as a tiny spin
-/// lock guarding `node`, which is initialized exactly when the state is
-/// `SLOT_FULL`. Locking is done by swapping in `SLOT_BUSY`, which turned out
-/// considerably faster than a compare-and-swap on Apple silicon.
-struct Slot {
-    state: AtomicU8,
-    node: UnsafeCell<MaybeUninit<Node<Linked>>>,
-}
+/// Slots are the variables of [`Instance`]s, which are filled by the reducer,
+/// but external handles may concurrently take nodes out of them (see
+/// [`Linker::deref`]). They also serve as variables for external handles.
+pub struct Slot<Ext: Clone>(SpinLock<Option<Node<Ext>>>);
 
-// SAFETY: access to `node` is serialized by `state`.
-unsafe impl Sync for Slot {}
-
-impl Slot {
-    fn new() -> Self {
-        Self {
-            state: AtomicU8::new(SLOT_EMPTY),
-            node: UnsafeCell::new(MaybeUninit::uninit()),
-        }
+impl<Ext: Clone> Slot<Ext> {
+    pub(crate) fn new() -> Self {
+        Self(SpinLock::new(None))
     }
 
     #[inline(always)]
-    fn take(&self) -> Option<Node<Linked>> {
-        loop {
-            match self.state.swap(SLOT_BUSY, Acquire) {
-                SLOT_FULL => {
-                    // SAFETY: the slot was full and we hold it busy.
-                    let node = unsafe { (*self.node.get()).assume_init_read() };
-                    self.state.store(SLOT_EMPTY, Release);
-                    return Some(node);
-                }
-                SLOT_EMPTY => {
-                    self.state.store(SLOT_EMPTY, Release);
-                    return None;
-                }
-                _ => std::hint::spin_loop(),
-            }
-        }
+    pub(crate) fn take(&self) -> Option<Node<Ext>> {
+        self.0.lock().take()
     }
 
     /// Puts `node` into the slot if it's empty. If it's already full, empties
     /// it instead, and returns the previous node together with `node`.
     #[inline(always)]
-    fn put(&self, node: Node<Linked>) -> Option<(Node<Linked>, Node<Linked>)> {
-        loop {
-            match self.state.swap(SLOT_BUSY, Acquire) {
-                SLOT_EMPTY => {
-                    // SAFETY: the slot was empty and we hold it busy.
-                    unsafe { (*self.node.get()).write(node) };
-                    self.state.store(SLOT_FULL, Release);
-                    return None;
-                }
-                SLOT_FULL => {
-                    // SAFETY: the slot was full and we hold it busy.
-                    let other = unsafe { (*self.node.get()).assume_init_read() };
-                    self.state.store(SLOT_EMPTY, Release);
-                    return Some((other, node));
-                }
-                _ => std::hint::spin_loop(),
+    pub(crate) fn put(&self, node: Node<Ext>) -> Option<(Node<Ext>, Node<Ext>)> {
+        let mut slot = self.0.lock();
+        match slot.take() {
+            Some(other) => Some((other, node)),
+            None => {
+                *slot = Some(node);
+                None
             }
         }
     }
 }
 
-impl Drop for Slot {
-    fn drop(&mut self) {
-        if *self.state.get_mut() == SLOT_FULL {
-            // SAFETY: the slot is full, so the node is initialized.
-            unsafe { self.node.get_mut().assume_init_drop() }
-        }
-    }
-}
-
-impl Debug for Slot {
+impl<Ext: Clone + Debug> Debug for Slot<Ext> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = match self.state.load(Acquire) {
-            SLOT_EMPTY => "Empty",
-            SLOT_FULL => "Full",
-            _ => "Busy",
-        };
-        f.debug_tuple("Slot").field(&state).finish()
+        self.0.fmt(f)
     }
 }
 
@@ -314,7 +259,7 @@ pub enum Node<Ext: Clone> {
 pub enum Shared<Ext: Clone> {
     /// Async values are created when sharing
     /// something that is not yet ready; a variable or a request.
-    Async(Arc<Mutex<SharedHole<Ext>>>),
+    Async(Arc<SpinLock<SharedHole<Ext>>>),
     /// Sync values are created when sharing
     /// a value or a package.
     Sync(Arc<SyncShared<Ext>>),
@@ -396,10 +341,10 @@ pub enum Linear<Ext: Clone> {
     /// until we know what to duplicate.
     ///
     /// This is also created in Fanout ~ Request interactions
-    ShareHole(Arc<Mutex<SharedHole<Linked>>>),
+    ShareHole(Arc<SpinLock<SharedHole<Linked>>>),
     // This variant is similiar to Global::Variable in function
     // but is used by external tasks.
-    Variable(Arc<Mutex<Option<Node<Ext>>>>),
+    Variable(Arc<Slot<Ext>>),
 }
 
 impl From<UserData> for Linear<Linked> {
@@ -505,19 +450,14 @@ pub(crate) trait Linker {
                         }
                     }
                 }
-                Node::Linear(Linear::Variable(mutex)) => {
-                    let mut lock = mutex.lock().unwrap();
-                    let slot = lock.take();
-                    drop(lock);
-                    match slot {
-                        None => {
-                            return Node::Linear(Linear::Variable(mutex));
-                        }
-                        Some(node2) => {
-                            node = node2;
-                        }
+                Node::Linear(Linear::Variable(slot)) => match slot.take() {
+                    None => {
+                        return Node::Linear(Linear::Variable(slot));
                     }
-                }
+                    Some(node2) => {
+                        node = node2;
+                    }
+                },
                 node => {
                     return node;
                 }
@@ -578,7 +518,7 @@ pub(crate) trait Linker {
         }
     }
     fn create_share_hole(&self) -> (Node<Linked>, Shared<Linked>) {
-        let state = Arc::new(Mutex::new(SharedHole::Unfilled(vec![])));
+        let state = Arc::new(SpinLock::new(SharedHole::Unfilled(vec![])));
         let hole = Node::Linear(Linear::ShareHole(state.clone()));
         (hole, Shared::Async(state))
     }
@@ -729,35 +669,32 @@ impl Runtime {
             Node::Linear(Linear::Request(..)) => None,
             Node::Linear(Linear::Continue) => None,
             Node::Linear(Linear::Par(..)) => None,
-            Node::Linear(Linear::Variable(mutex)) => {
-                let mut lock = mutex.lock().unwrap();
-                match lock.take() {
-                    Some(slot) => {
-                        drop(lock);
-                        self.rewrites.share_sync += 1;
-                        Some(self.share_inner(slot)?)
-                    }
-                    _ => {
-                        self.rewrites.share_async += 1;
-                        let (hole, shared) = self.create_share_hole();
-                        lock.replace(hole);
-                        Some(shared)
-                    }
+            Node::Linear(Linear::Variable(slot)) => match slot.take() {
+                Some(node) => {
+                    self.rewrites.share_sync += 1;
+                    Some(self.share_inner(node)?)
                 }
-            }
+                None => {
+                    self.rewrites.share_async += 1;
+                    let (hole, shared) = self.create_share_hole();
+                    if let Some((other, hole)) = slot.put(hole) {
+                        self.link(other, hole);
+                    }
+                    Some(shared)
+                }
+            },
             Node::Linear(Linear::ShareHole(..)) => None,
         }
     }
 
-    fn fill_hole(&mut self, hole: Arc<Mutex<SharedHole<Linked>>>, value: Node<Linked>) {
+    fn fill_hole(&mut self, hole: Arc<SpinLock<SharedHole<Linked>>>, value: Node<Linked>) {
         let value = self.share(value).unwrap();
         match value {
-            Shared::Async(value) => self.enqueue_to_hole(
-                &mut value.lock().unwrap(),
-                Node::Linear(Linear::ShareHole(hole)),
-            ),
+            Shared::Async(value) => {
+                self.enqueue_to_hole(&mut value.lock(), Node::Linear(Linear::ShareHole(hole)))
+            }
             Shared::Sync(value) => {
-                let mut lock = hole.lock().unwrap();
+                let mut lock = hole.lock();
                 let SharedHole::Unfilled(continuations) =
                     core::mem::replace(&mut *lock, SharedHole::Filled((*value).clone()))
                 else {
@@ -1125,15 +1062,9 @@ impl Runtime {
             sym!(NodeRef::Global(instance, _, Global::Variable(index)), value) => {
                 self.set_var(instance, *index, value.into_node())
             }
-            sym!(NodeRef::Linear(Linear::Variable(mutex)), value) => {
-                let mut lock = mutex.lock().unwrap();
-                match lock.take() {
-                    Some(node) => {
-                        self.link(node, value.into_node());
-                    }
-                    None => {
-                        lock.replace(value.into_node());
-                    }
+            sym!(NodeRef::Linear(Linear::Variable(slot)), value) => {
+                if let Some((a, b)) = slot.put(value.into_node()) {
+                    self.link(a, b);
                 }
             }
             sym!(
@@ -1157,7 +1088,7 @@ impl Runtime {
                 self.rewrites.fanout += 1;
             }
             sym!(NodeRef::Shared(Shared::Async(state)), other) => {
-                let mut lock = state.lock().unwrap();
+                let mut lock = state.lock();
                 self.enqueue_to_hole(&mut *lock, other.into_node());
             }
             sym!(

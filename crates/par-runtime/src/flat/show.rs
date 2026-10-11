@@ -63,7 +63,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Linear<Ext>,
                 write!(f, "<external variable>")?;
             }
             Linear::ShareHole(mutex) => match mutex.try_lock() {
-                Ok(lock) => match &*lock {
+                Some(lock) => match &*lock {
                     crate::flat::runtime::SharedHole::Filled(_sync_shared) => {
                         write!(f, "<unexpected filled share hole>")?;
                     }
@@ -84,7 +84,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Shared<Ext>,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Shared::Async(mutex) => match mutex.try_lock() {
-                Ok(lock) => match &*lock {
+                Some(lock) => match &*lock {
                     crate::flat::runtime::SharedHole::Filled(sync_shared) => {
                         write!(f, "{}", Showable(sync_shared, self.1))?;
                     }

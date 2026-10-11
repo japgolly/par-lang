@@ -1,5 +1,5 @@
 use super::reducer::{NetHandle, ReducerMessage};
-use super::runtime::{ExternalFn, Global, GlobalCont, Linear, Node, PackagePtr, Value};
+use super::runtime::{ExternalFn, Global, GlobalCont, Linear, Node, PackagePtr, Slot, Value};
 use crate::data::Data;
 use crate::flat::arena::{Arena, Index};
 use crate::flat::runtime::Linker;
@@ -8,7 +8,7 @@ use arcstr::ArcStr;
 use futures::task::FutureObj;
 use std::future::Future;
 use std::mem;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::linker::Linked;
 use tokio::sync::oneshot;
@@ -40,10 +40,10 @@ pub struct Handle {
 }
 
 fn linked_pair() -> (Node<Linked>, Node<Linked>) {
-    let mutex = Arc::new(Mutex::new(None));
+    let slot = Arc::new(Slot::new());
     (
-        Node::Linear(Linear::Variable(mutex.clone())),
-        Node::Linear(Linear::Variable(mutex)),
+        Node::Linear(Linear::Variable(slot.clone())),
+        Node::Linear(Linear::Variable(slot)),
     )
 }
 
