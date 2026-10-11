@@ -41,7 +41,7 @@ clearer as we understand this process syntax.
 Processes and commands have been more hidden, so far. They were always there, but not in a plain sight! Any expression, be
 it a construction, or a destruction, compiled to processes composed of commands.
 
-In fact, you can see it for yourself! Let's take any Par program, say `examples/src/HelloWorld.par`.
+In fact, you can see it for yourself! Let's take any Par program, say `examples/small/src/HelloWorld.par`.
 
 ```par
 module HelloWorld

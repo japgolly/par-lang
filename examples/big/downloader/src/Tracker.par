@@ -1,0 +1,222 @@
+module Tracker
+
+import {
+  @core/Bool
+  @core/BoxMap
+  @core/List
+  @core/Nat
+  @core/Option
+  @core/Stream
+  @core/String
+  @core/Time
+  @core/Try
+}
+
+export {
+  // The single controller of the tracker: starts and cancels downloads, and
+  // brings in viewers, until it shuts the tracker down.
+  //
+  // - `.start(name, download)` answers `.false!` if a download with that name
+  //   is already running. The download is then dropped without being started.
+  // - `.cancel(name)` answers `.false!` if there's no such download.
+  type Controller = recursive either {
+    .shutdown!,
+    .start(String, Download) [Bool] self,
+    .cancel(String) [Bool] self,
+    .watch(Viewer) self,
+  }
+
+  // A download, from the tracker's point of view. The tracker pulls updates
+  // from it, and closes it to cancel it. A download fails with a message.
+  type Download = Stream<String, Update>
+
+  type Update = either {
+    .started Nat,     // the expected size in bytes, 0 if unknown
+    .progressed Nat,  // bytes downloaded since the previous update
+  }
+
+  // Someone watching the downloads. A push answers `.none!` once the viewer
+  // is gone, and the tracker forgets it.
+  type Viewer = iterative choice {
+    .close* => !,
+    .push(Notice) => Option<self>,
+  }
+
+  // What viewers are told. Every notice carries the download's name.
+  type Notice = either {
+    .added String,                           // accepted, not started yet
+    .started(String, Nat)!,                  // expected size, 0 if unknown
+    .progressed(String, Nat)!,               // bytes downloaded so far
+    .finished(String, Nat, Time.Duration)!,  // final size, time taken
+    .failed(String, String)!,                // error message
+    .cancelled String,
+  }
+
+  dec Serve : [Controller] !
+}
+
+// What the tracker remembers about an active download: when it started, its
+// expected size once known, the bytes downloaded so far, and whether it was
+// asked to cancel.
+type Entry = (Time.Instant, Option<Nat>, Nat, Bool)!
+
+dec NewEntry : Entry
+def NewEntry = (Time.Now, .none!, 0, .false!)!
+
+// The controller and all the running downloads, fanned into one type the pool
+// can hold. A started download enters the pool next to the controller.
+type Client = recursive either {
+  .shutdown!,
+  .start(String) choice {
+    .taken => self,
+    .free => (self) self,
+  },
+  .cancel(String) [Bool] self,
+  .watch(Viewer) self,
+  .download(String) either {
+    .end Try<String, !>,
+    .item(Update) choice {
+      .close => !,
+      .next => self,
+    },
+  },
+}
+
+dec Fan : [Controller] Client
+def Fan = [controller] controller.begin.case {
+  .shutdown! => .shutdown!,
+  .start(name, download) controller => .start(name) case {
+    .taken => controller(.false!).loop,
+    .free => (Pull(name, download)) controller(.true!).loop,
+  },
+  .cancel(name) controller => .cancel(name) [found] controller(found).loop,
+  .watch(viewer) controller => .watch(viewer) controller.loop,
+}
+
+// Pulls the download's next update as soon as the tracker asks for it, so
+// the download keeps going while the tracker deals with other clients.
+dec Pull : [String, Download] Client
+def Pull = [name, download] do { download.begin } in download.next.case {
+  .end result => .download(name).end result,
+  .item(update) download => .download(name).item(update) case {
+    .close => download.close,
+    .next => download.loop,
+  },
+}
+
+def Serve = [controller] chan exit {
+  let downloads = BoxMap.New(type String, type Entry)
+  let viewers: List<Viewer> = .end!
+  let stopping: Bool = .false!
+
+  poll(Fan(controller)) {
+    client => {
+      client.case {
+        // No more downloads or viewers will come. Every running download is
+        // cancelled when it next reports, and then the pool runs empty.
+        .shutdown! => {
+          let stopping: Bool = .true!
+          submit()
+        }
+
+        .start(name) => {
+          if downloads.get(name) is .some _ => {
+            client.taken
+            submit(client)
+          }
+          downloads.put(name, NewEntry)
+          viewers->Broadcast(.added name)
+          client.free[download]
+          submit(download, client)
+        }
+
+        .cancel(name) => {
+          if downloads.get(name) is .some(started, expected, downloaded, _)! => {
+            downloads.put(name, (started, expected, downloaded, .true!)!)
+            submit(client(.true!))
+          }
+          submit(client(.false!))
+        }
+
+        // A new viewer first hears about the downloads already running.
+        .watch(viewer) => {
+          let current = List.FlatMap(downloads.list, box [(name) entry] Describe(name, entry))
+          viewers->Add(PushAll(viewer, current))
+          submit(client)
+        }
+
+        .download(name) => {
+          let (started, expected, downloaded, cancelling)! = downloads.get(name).default(NewEntry)
+          client.case {
+            .end result => {
+              downloads.delete(name)
+              result.case {
+                .ok! => {
+                  let duration = Time.Now->Time.Since(started)
+                  viewers->Broadcast(.finished(name, downloaded, duration)!)
+                }
+                .err error => {
+                  viewers->Broadcast(.failed(name, error)!)
+                }
+              }
+              submit()
+            }
+
+            .item(update) => {
+              if cancelling or stopping => {
+                client.close
+                downloads.delete(name)
+                viewers->Broadcast(.cancelled name)
+                submit()
+              }
+              update.case {
+                .started size => {
+                  downloads.put(name, (Time.Now, .some size, downloaded, cancelling)!)
+                  viewers->Broadcast(.started(name, size)!)
+                }
+                .progressed size => {
+                  let downloaded = downloaded + size
+                  downloads.put(name, (started, expected, downloaded, cancelling)!)
+                  viewers->Broadcast(.progressed(name, downloaded)!)
+                }
+              }
+              client.next
+              submit(client)
+            }
+          }
+        }
+      }
+    }
+
+    // The controller is gone and so is every download. Leaving the viewers
+    // behind closes them.
+    else => { exit! }
+  }
+}
+
+// Pushes a notice to every viewer, keeping those still there. Nothing here
+// makes the tracker wait: the new list is built while it carries on.
+dec Broadcast : [List<Viewer>, Notice] List<Viewer>
+def Broadcast = [viewers, notice] List.FilterMap(viewers, box [viewer] viewer.push(notice))
+
+dec PushAll : [Viewer, List<Notice>] Option<Viewer>
+def PushAll = [viewer, notices] notices.begin.case {
+  .end! => .some viewer,
+  .item(notice) notices => viewer.push(notice).case {
+    .none! => .none!,
+    .some viewer => notices.loop,
+  },
+}
+
+dec Add : [List<Viewer>, Option<Viewer>] List<Viewer>
+def Add = [viewers, viewer] viewer.case {
+  .none! => viewers,
+  .some viewer => .item(viewer) viewers,
+}
+
+// The notices that bring a new viewer up to date on one download.
+dec Describe : [String, Entry] List<Notice>
+def Describe = [name, (_, expected, downloaded, _)!] expected.case {
+  .none! => *(.added name),
+  .some size => *(.added name, .started(name, size)!, .progressed(name, downloaded)!),
+}

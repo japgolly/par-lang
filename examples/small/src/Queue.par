@@ -1,0 +1,101 @@
+module Queue
+
+import {
+  @core/List
+  @core/String
+  @basic/Console
+}
+
+// A first-in, first-out queue. Pushing is always possible, so that part is
+// `iterative`. Popping is `recursive`: we can only pop as many items as were
+// pushed, and then the queue ends. Pushing again gets us back to the start.
+type Queue<a> =
+  iterative@push recursive@pop
+  choice {
+    .push(a) => self@push,
+    .pop => either {
+      .end!,
+      .item(a) self@pop,
+    }
+  }
+
+// This implementation of the queue has time complexity O(1)
+// for both pushing and popping. Not amortized, O(1) every time.
+dec Empty : [type a] Queue<a>
+def Empty = [type a] do {
+  let front: List<a> = .end!
+  let back = List.Builder(type a)
+} in begin@push case {
+  .push(value) => do {
+    back.add(value)
+  } in loop@push,
+
+  .pop => front.begin@pop.case {
+    .end! => back.build.begin@pop.case {
+      .end! => .end!,
+      .item(value) front => .item(value) case {
+        .push(value) => do {
+          let back = List.Builder(type a) 
+          back.add(value)
+        } in loop@push,
+        .pop => front.loop@pop,
+      }
+    }
+    .item(value) front => .item(value) case {
+      .push(value) => do {
+        back.add(value)
+      } in loop@push,
+      .pop => front.loop@pop,
+    }
+  }
+}
+
+// Try `PlayWithQueue` in the playground (`par playground`) to push and pop by
+// hand.
+def PlayWithQueue: Queue<String> = Empty(type String)
+
+type Op = either {
+  .push String,
+  .pop!,
+}
+
+// Runs a few operations on a queue, and prints what they do.
+def Main: ! = do {
+  let console = Console.Open
+  let queue = Empty(type String)
+  let ops: List<Op> = *(.push "Alice", .push "Bob", .pop!, .push "Cyril", .pop!, .pop!, .pop!, .push "Dave")
+
+  ops.begin.case {
+    // A queue can't be dropped, so we pop whatever is left.
+    .end! => {
+      queue.begin.pop.case {
+        .end! => {}
+        .item(name) => {
+          console.print(`left -> ${name}`)
+          queue.loop
+        }
+      }
+    }
+    .item(op) => {
+      op.case {
+        .push name => {
+          console.print(`push ${name}`)
+          queue.push(name)
+        }
+        .pop! => {
+          queue.pop.case {
+            .item(name) => {
+              console.print(`pop  -> ${name}`)
+            }
+            // An ended queue is gone, so we start a new one.
+            .end! => {
+              console.print("pop  -> the queue is empty")
+              let queue = Empty(type String)
+            }
+          }
+        }
+      }
+      ops.loop
+    }
+  }
+} in !

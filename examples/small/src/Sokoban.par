@@ -1,0 +1,204 @@
+module Sokoban
+
+import {
+  @core/Bool
+  @core/Char
+  @core/Int
+  @core/List
+  @core/Option
+  @core/Stream
+  @core/String
+  @basic/Console
+  @basic/Os
+}
+
+// The level, in the usual Sokoban notation: `#` is a wall, `$` a box, `.` a
+// goal, and `@` the player. A box on a goal is `*`, the player on a goal is `+`.
+// Push every box onto a goal to win.
+def Layout = "
+  ######
+  #    #
+### ## #
+#  $   #
+# #. #.##
+#   $   #
+###.$ # #
+  #@    #
+  #######
+"
+
+def Controls = "
+╭────────┬──────────┬──────────┬───────────┬──────────┬──────────╮
+│ Up [w] │ Left [a] │ Down [s] │ Right [d] │ Undo [u] │ Exit [x] │
+╰────────┴──────────┴──────────┴───────────┴──────────┴──────────╯
+Type one or more keys, then press Enter."
+
+// A square on the level, `(x, y)!`, with `y` growing downwards.
+type Coord = (Int, Int)!
+
+type Direction = either {
+  .up!,
+  .left!,
+  .down!,
+  .right!,
+}
+
+// The parts of a level that never change: its squares row by row, the walls,
+// and the goals.
+type Level = box choice {
+  .rows => List<List<Coord>>,
+  .walls => List<Coord>,
+  .goals => List<Coord>,
+}
+
+// What changes as we play: where the player stands, and where the boxes are.
+// It's plain data, so undo just remembers the previous states.
+type State = (Coord, List<Coord>)!
+
+// Plays until the level is solved, the player exits, or the input runs out.
+//
+// Par only allows loops that surely end. The lines of the standard input end
+// when the input does, so we can loop over them freely, and redraw after each.
+def Main: ! = chan exit {
+  let console = Console.Open
+  catch error => {
+    console.print(`Cannot read the input: ${error}`)
+    exit!
+  }
+
+  let (level) state = Load(Layout)
+  let history: List<State> = .end!
+  let facing: Direction = .down!  // just for show
+
+  console.print(Screen(level, state, facing, `Moves: #{List.Length(history)}\n${Controls}`))
+
+  Os.Stdin->String.ParseReader->String.Lines.begin.next.case {
+    .end try! => { exit! }
+    .item(line) lines => {
+      let keys = String.Chars(line)
+      keys.begin@keys.case {
+        .end! => {}
+        .item(key) => {
+          if {
+            key == "x" => { exit! }
+            key == "u" and history is .item(previous) older => {
+              let state = previous
+              let history = older
+            }
+            Direction(key) is .some direction => {
+              let facing = direction
+              if Move(level, state, direction) is .some moved => {
+                let history = .item(state) history
+                let state = moved
+              }
+              if Solved(level, state) => {
+                console.print(Screen(level, state, facing, `Solved in #{List.Length(history)} moves!`))
+                exit!
+              }
+            }
+            else => {}
+          }
+          keys.loop@keys
+        }
+      }
+      lines.loop
+    }
+  }
+}
+
+dec Direction : [Char] Option<Direction>
+def Direction = [key] if {
+  key == "w" => .some .up!,
+  key == "a" => .some .left!,
+  key == "s" => .some .down!,
+  key == "d" => .some .right!,
+  else => .none!,
+}
+
+// Steps the player in a direction, pushing the box in front of them, if there
+// is one. Answers `.none!` if a wall is in the way, or if the box would hit a
+// wall or another box.
+dec Move : [Level, State, Direction] Option<State>
+def Move = [level, (player, boxes)!, direction] do {
+  let next = Step(player, direction)
+  let beyond = Step(next, direction)
+  let walls = level.walls
+} in if {
+  walls->Has(next) => .none!,
+  not boxes->Has(next) => .some (next, boxes)!,
+  walls->Has(beyond) or boxes->Has(beyond) => .none!,
+  else => .some (next, List.Map(boxes, box [at] if { at == next => beyond, else => at }))!,
+}
+
+dec Step : [Coord, Direction] Coord
+def Step = [(x, y)!, direction] direction.case {
+  .up! => (x, y - 1)!,
+  .left! => (x - 1, y)!,
+  .down! => (x, y + 1)!,
+  .right! => (x + 1, y)!,
+}
+
+dec Solved : [Level, State] Bool
+def Solved = [level, (_, boxes)!] List.All(boxes, box [at] level.goals->Has(at))
+
+// Clears the terminal and draws the level with a message below. Each square is
+// two characters wide, so that the level looks about as tall as it is wide.
+dec Screen : [Level, State, Direction, String] String
+def Screen = [level, (player, boxes)!, facing, message] do {
+  let walls = level.walls
+  let goals = level.goals
+  let board = String.Join(List.Map(level.rows, box [row]
+    String.Concat(List.Map(row, box [at] if {
+      at == player => Color("1;36", PlayerGlyph(facing)),
+      boxes->Has(at) and goals->Has(at) => Color("32", "◉ "),
+      boxes->Has(at) => Color("33", "● "),
+      goals->Has(at) => Color("31", "○ "),
+      walls->Has(at) => "██",
+      else => "  ",
+    }))
+  ), "\n")
+} in `\x1b[2J\x1b[H${board}\n\n${message}`
+
+dec PlayerGlyph : [Direction] String
+def PlayerGlyph = [direction] direction.case {
+  .up! => "▲ ",
+  .left! => "◀ ",
+  .down! => "▼ ",
+  .right! => "▶ ",
+}
+
+// Wraps text in an ANSI color code.
+dec Color : [String, String] String
+def Color = [code, text] `\x1b[${code}m${text}\x1b[0m`
+
+// Reads a level from its layout, and finds where the player and the boxes
+// start. Splitting a plain string can't fail, so we ignore the status reported
+// by `Collect`.
+dec Load : [String] (Level) State
+def Load = [layout] do {
+  let (_) lines = String.Parse(String.TrimLeft(layout, .str "\n"))->String.Lines->Stream.Collect
+  let squares: List<List<(Coord) Char>> = List.Map(List.Enumerate(lines), box [(y) line]
+    List.Map(List.Enumerate(String.Chars(line)), box [(x) char] ((x, y)!) char)
+  )
+
+  // The coordinates of the squares marked with one of the given characters.
+  let find = box [marks: List<Char>] List.FilterMap(List.Concat(squares), box [(at) char] if {
+    marks->List.Any(box [mark] mark == char) => .some at,
+    else => .none!,
+  })
+
+  let rows = List.Map(squares, box [row] List.Map(row, box [(at) _] at))
+  let walls = find(*("#"))
+  let goals = find(*(".", "*", "+"))
+  let player = find(*("@", "+")).case {
+    .item(at) _ => at,
+    .end! => (0, 0)!,
+  }
+} in (box case {
+  .rows => rows,
+  .walls => walls,
+  .goals => goals,
+}) (player, find(*("$", "*")))!
+
+dec Has : [List<Coord>, Coord] Bool
+def Has = [list, coord] List.Any(list, box [at] at == coord)

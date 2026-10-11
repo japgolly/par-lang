@@ -24,11 +24,24 @@ where
 #[test]
 fn check_all_examples() -> Result<(), String> {
     run_with_large_stack(|| {
-        // Check the examples package as a whole.
-        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        d.push("examples");
-        eprintln!("Checking {:?}", d);
-        check(d)
+        // Check every example package: the small examples share one package,
+        // and each big example is its own.
+        let examples = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let mut packages = vec![examples.join("small")];
+        let mut big = std::fs::read_dir(examples.join("big"))
+            .map_err(|err| format!("Failed to read big examples: {err}"))?
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("Failed to read big examples: {err}"))?;
+        big.retain(|path| path.join("Par.toml").is_file());
+        big.sort();
+        packages.extend(big);
+
+        for d in packages {
+            eprintln!("Checking {:?}", d);
+            check(d)?;
+        }
+        Ok(())
     })
 }
 

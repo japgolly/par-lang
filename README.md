@@ -18,6 +18,11 @@
 
 ## 💡 Check out the [examples](examples/)
 
+- **[Chat](examples/big/chat/):** a chat room in the browser.
+- **[Downloader](examples/big/downloader/):** downloads files, with live progress and cancelling on a web page.
+- **[Tasks](examples/big/tasks/):** a task list in the browser, stored in SQLite.
+- **[Small examples](examples/small/src/)** of individual features, including a Sokoban game in the terminal.
+
 # ✨ Features
 
 ![Annotated Code Example](./screenshots/annotated_code_example.png)

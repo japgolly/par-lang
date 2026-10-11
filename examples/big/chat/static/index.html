@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Par Chat</title>
+  <style>
+    body { font-family: ui-monospace, monospace; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+    #log { border: 1px solid #999; height: 60vh; overflow-y: auto; padding: .5rem; margin-bottom: .5rem; }
+    #log p { margin: .15rem 0; white-space: pre-wrap; }
+    .system { color: #888; font-style: italic; }
+    form { display: flex; gap: .5rem; }
+    input { flex: 1; font: inherit; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>⅋ chat</h1>
+  <form id="join">
+    <input id="name" placeholder="Your name" autofocus required>
+    <button>Join</button>
+  </form>
+  <div id="chat" hidden>
+    <div id="log"></div>
+    <form id="send">
+      <input id="text" placeholder="Say something" autocomplete="off">
+      <button>Send</button>
+    </form>
+  </div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let socket;
+
+    function show(line, kind) {
+      const p = document.createElement("p");
+      p.textContent = `[${new Date().toLocaleTimeString()}] ${line}`;
+      if (kind) p.className = kind;
+      $("log").append(p);
+      $("log").scrollTop = $("log").scrollHeight;
+    }
+
+    $("join").onsubmit = (event) => {
+      event.preventDefault();
+      const name = encodeURIComponent($("name").value);
+      socket = new WebSocket(`ws://${location.host}/ws?name=${name}`);
+      socket.onopen = () => {
+        $("join").hidden = true;
+        $("chat").hidden = false;
+        $("text").focus();
+      };
+      socket.onmessage = (message) => {
+        const { kind, name, text } = JSON.parse(message.data);
+        if (kind === "message") show(`${name}: ${text}`);
+        else show(`${name} ${kind} the room`, "system");
+      };
+      socket.onclose = () => {
+        show("disconnected", "system");
+        $("text").disabled = true;
+      };
+    };
+
+    $("send").onsubmit = (event) => {
+      event.preventDefault();
+      if ($("text").value) socket.send($("text").value);
+      $("text").value = "";
+    };
+  </script>
+</body>
+</html>

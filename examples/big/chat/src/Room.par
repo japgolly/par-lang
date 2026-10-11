@@ -1,0 +1,138 @@
+module Room
+
+import {
+  @basic/WebSocket
+  @core/BoxMap
+  @core/Debug
+  @core/Json
+  @core/Map
+  @core/Nat
+  @core/Option
+  @core/String
+  @core/Try
+  @core/List
+}
+
+export {
+  // The single controller of the room: hands over new users until shutdown.
+  type Controller = recursive either {
+    .shutdown!,
+    .enter(User) self,
+  }
+
+  // One user's session, from the room's point of view. The user either fails
+  // to connect, or asks to join with a name and an outbox. Once accepted, it
+  // says things until it leaves.
+  type User = either {
+    .failed!,
+    .join(String, Outbox) choice {
+      .accept(Nat) => recursive either {
+        .say(String) self,
+        .leave!,
+      },
+      .reject* => !,
+    },
+  }
+
+  type Outbox = iterative choice {
+    .close* => !,
+    .push(String) => self,
+  }
+
+  dec Outbox : [WebSocket.Writer] Outbox
+  dec Serve : [Controller] !
+}
+
+// The controller and all the users, fanned into one type the pool can hold.
+// Every interaction of an accepted user carries its id and name.
+type Room = recursive either {
+  .end!,
+  .spawn(self) self,
+  .shutdown!,
+  .join(String, Outbox) choice {
+    .accept(Nat) => self,
+    .reject* => !,
+  },
+  .say(String, String) self,
+  .leave(Nat, String)!,
+}
+
+dec Fan : [Controller] Room
+def Fan = [controller] controller.begin.case {
+  .shutdown! => .shutdown!,
+  .enter(user) controller => .spawn(FanUser(user)) controller.loop,
+}
+
+dec FanUser : [User] Room
+def FanUser = [user] user.case {
+  .failed! => .end!,
+  .join(name, outbox) user => .join(name, outbox) case {
+    .accept(id) => user.accept(id).begin.case {
+      .say(text) user => .say(name, text) user.loop,
+      .leave! => .leave(id, name)!,
+    },
+    .reject* => user.reject,
+  },
+}
+
+def Outbox = [writer]
+  let conn: Option<WebSocket.Writer> = .some writer
+  in begin case {
+    .close* => !,
+    .push(text) => let conn = conn.case {
+      .none! => .none!,
+      .some writer => writer.send(.text text)->Try.ToOption,
+    } in loop,
+  }
+
+def Serve = [controller] do {
+  let members = Map.New(type Nat, type Outbox)
+  let lastId = 0
+} in poll(Fan(controller)) {
+  client => client.case {
+    .end! => submit(),
+    .spawn(left) right => submit(left, right),
+
+    .join(name, outbox) client => do {
+      lastId += 1
+      client.accept(lastId)
+      members.entry(lastId)[_].put(outbox)
+      members->Broadcast(Event("joined", name, ""))
+      Debug.Log(`${name} joined`)
+    } in submit(client),
+
+    .say(name, text) client => do {
+      members->Broadcast(Event("message", name, text))
+    } in submit(client),
+
+    .leave(id, name)! => do {
+      members.entry(id)[_].delete
+      members->Broadcast(Event("left", name, ""))
+      Debug.Log(`${name} left`)
+    } in submit(),
+
+    // Dropping `members` closes every outbox, so every browser closes its
+    // socket and its user leaves. Every client is droppable, so draining the
+    // pool is just letting them go: a pending join gets its `.reject*`.
+    .shutdown! => do {
+      Debug.Log("Shutting down, closing all connections...")
+      let _ = members
+    } in repoll() {
+      client => submit(),
+      else => !,
+    },
+  }
+  else => !,
+}
+
+dec Broadcast : [Map<Nat, Outbox>, String] Map<Nat, Outbox>
+def Broadcast = [members, line] Map.FromList(
+  List.Map(members.list, box [(id) outbox] (id) outbox.push(line)),
+)
+
+dec Event : [String, String, String] String
+def Event = [kind, name, text] Json.Encode(.object BoxMap.FromList(*(
+  ("kind") .string kind,
+  ("name") .string name,
+  ("text") .string text,
+)))
