@@ -567,8 +567,10 @@ impl Runtime {
     /// This function is analogous to a "VM enter"
     pub fn reduce(&mut self) -> Option<(UserData, Node<Linked>)> {
         while let Some((a, b)) = self.redexes.pop() {
-            if let Some(v) = self.interact(a, b) {
-                return Some(v);
+            if let Err((a, b)) = self.interact_fast(a, b) {
+                if let Some(v) = self.interact(a, b) {
+                    return Some(v);
+                }
             }
         }
         None
@@ -909,11 +911,11 @@ impl Runtime {
     /// Carry out an interaction between two nodes.
     /// Returns Some if an external operation with `UserData` was attempted.
     /// and None otherwise
+    ///
+    /// The most frequent interactions are handled by [`Runtime::interact_fast`]
+    /// before getting here, keeping this large function out of the hot loop.
+    #[inline(never)]
     fn interact(&mut self, a: Node<Linked>, b: Node<Linked>) -> Option<(UserData, Node<Linked>)> {
-        let (a, b) = match self.interact_fast(a, b) {
-            Ok(()) => return None,
-            Err(nodes) => nodes,
-        };
         /// NodeRef is an internal structure to make matching on Nodes easier.
         /// It is like a Node but includes a reference to the Global in the Global branch
         /// to allow matching on it
