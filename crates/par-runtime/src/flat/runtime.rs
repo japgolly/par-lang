@@ -791,6 +791,26 @@ impl Runtime {
             }
             _ => false,
         };
+        let is_linear_variable =
+            |node: &Node<Linked>| matches!(node, Node::Linear(Linear::Variable(_)));
+        // Whether a global node gets to instantiate a shared package as (4),
+        // instead of something with a higher priority happening.
+        let instantiates_shared = |g: &Global<Linked>, node: &Node<Linked>| {
+            matches!(
+                g,
+                Global::Value(_)
+                    | Global::Destruct(
+                        GlobalCont::Par(..) | GlobalCont::Choice(..) | GlobalCont::Continue
+                    )
+            ) && matches!(
+                node,
+                Node::Shared(Shared::Sync(shared)) if matches!(**shared, SyncShared::Package(..))
+            )
+        };
+        let is_linear_either = |node: &Node<Linked>| match node {
+            Node::Linear(Linear::Value(value)) => matches!(**value, Value::Either(..)),
+            _ => false,
+        };
         let (ga, gb) = (global(&a), global(&b));
         match (ga, gb) {
             // (2) Linking variables. Only box-like packages take precedence.
@@ -807,6 +827,18 @@ impl Runtime {
                     unreachable!()
                 };
                 return Ok(self.set_var_next(instance, index, a));
+            }
+            (None, gb) if is_linear_variable(&a) && !is_expand(gb) => {
+                let Node::Linear(Linear::Variable(slot)) = a else {
+                    unreachable!()
+                };
+                return Ok(slot.put(b));
+            }
+            (ga, None) if is_linear_variable(&b) && !is_expand(ga) => {
+                let Node::Linear(Linear::Variable(slot)) = b else {
+                    unreachable!()
+                };
+                return Ok(slot.put(a));
             }
             // (3) Fanout.
             (Some(Global::Fanout(destinations)), gb) if fanout_applies(gb, &b) => {
@@ -893,6 +925,69 @@ impl Runtime {
                     context,
                     options,
                 )));
+            }
+            (Some(Global::Destruct(GlobalCont::Choice(context, options))), None)
+                if is_linear_either(&b) =>
+            {
+                let (context, options) = (*context, *options);
+                let (Node::Global(choice_instance, _), Node::Linear(Linear::Value(value))) = (a, b)
+                else {
+                    unreachable!()
+                };
+                let Value::Either(signal, payload) = *value else {
+                    unreachable!()
+                };
+                return Ok(Some(self.interact_either_choice(
+                    signal,
+                    payload,
+                    choice_instance,
+                    context,
+                    options,
+                )));
+            }
+            (None, Some(Global::Destruct(GlobalCont::Choice(context, options))))
+                if is_linear_either(&a) =>
+            {
+                let (context, options) = (*context, *options);
+                let (Node::Linear(Linear::Value(value)), Node::Global(choice_instance, _)) = (a, b)
+                else {
+                    unreachable!()
+                };
+                let Value::Either(signal, payload) = *value else {
+                    unreachable!()
+                };
+                return Ok(Some(self.interact_either_choice(
+                    signal,
+                    payload,
+                    choice_instance,
+                    context,
+                    options,
+                )));
+            }
+            // (4) Instantiating shared packages.
+            (None, Some(gb)) if instantiates_shared(gb, &a) => {
+                let Node::Shared(Shared::Sync(shared)) = a else {
+                    unreachable!()
+                };
+                let SyncShared::Package(package, captures) = &*shared else {
+                    unreachable!()
+                };
+                self.rewrites.instantiate += 1;
+                let root =
+                    self.instantiate_package_captures(*package, Node::Shared(captures.clone()));
+                return Ok(Some((root, b)));
+            }
+            (Some(ga), None) if instantiates_shared(ga, &b) => {
+                let Node::Shared(Shared::Sync(shared)) = b else {
+                    unreachable!()
+                };
+                let SyncShared::Package(package, captures) = &*shared else {
+                    unreachable!()
+                };
+                self.rewrites.instantiate += 1;
+                let root =
+                    self.instantiate_package_captures(*package, Node::Shared(captures.clone()));
+                return Ok(Some((root, a)));
             }
             (Some(Global::Destruct(GlobalCont::Continue)), gb) if is_break(gb, &b) => {
                 self.rewrites.r#continue += 1;
