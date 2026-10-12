@@ -196,6 +196,14 @@ pub struct PackageBody<Ext: Clone> {
     pub redexes: Index<Ext, [(Index<Ext, Global<Ext>>, Index<Ext, Global<Ext>>)]>,
 }
 
+/// Where the captures of an instantiated package come from.
+pub(crate) enum Captures<'a> {
+    /// The captures of a [`Global::Package`] node, in the node's instance.
+    Global(Instance, Index<Linked, [Global<Linked>]>),
+    /// The captures of a shared package.
+    Shared(&'a [Shared<Linked>]),
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct LinkedPackageBody {
     root: GlobalPtr<Linked>,
@@ -217,8 +225,9 @@ impl From<&PackageBody<Linked>> for LinkedPackageBody {
 /// separate Instance to be created when it is expanded.
 pub struct Package<Ext: Clone> {
     pub body: PackageBody<Ext>,
-    /// Receives the package's captures when it's instantiated.
-    pub captures: Index<Ext, Global<Ext>>,
+    /// The variables of the first slots of the package's instance, which
+    /// receive its captures when it's instantiated.
+    pub captures: Index<Ext, [Global<Ext>]>,
     /// How large the Instance must be.
     pub num_vars: usize,
 }
@@ -231,7 +240,9 @@ pub enum Global<Ext: Clone> {
         signal: Str<Ext>,
         erase: GlobalPtr<Ext>,
     },
-    Package(PackagePtr<Ext>, GlobalPtr<Ext>, FanBehavior),
+    /// A package with its captures, which get moved into the first variable
+    /// slots of its instance when it's instantiated.
+    Package(PackagePtr<Ext>, Index<Ext, [Global<Ext>]>, FanBehavior),
     /// Destruct attempts to convert the interacting node into a value,
     /// and then carries out a negative operation on it according to its variant
     /// This node is created from the Continue, Case, and Receive commands.
@@ -316,7 +327,7 @@ impl<P, Ext: Clone> Value<P, Ext> {
 
 #[derive(Clone, Debug)]
 pub enum SyncShared<Ext: Clone> {
-    Package(PackagePtr<Ext>, Shared<Ext>),
+    Package(PackagePtr<Ext>, Box<[Shared<Ext>]>),
     Value(Value<Shared<Ext>, Ext>),
 }
 
@@ -399,9 +410,9 @@ pub(crate) trait Linker {
         match node {
             Node::Linear(Linear::Value(v)) => Ok(*v),
             Node::Shared(Shared::Sync(shared)) => match &*shared {
-                SyncShared::Package(package, shared) => {
+                SyncShared::Package(package, captures) => {
                     let Node::Global(instance, global_index) =
-                        self.instantiate_package_captures(*package, Node::Shared(shared.clone()))
+                        self.instantiate_package(*package, Captures::Shared(captures))
                     else {
                         unreachable!("should be a global")
                     };
@@ -482,19 +493,58 @@ pub(crate) trait Linker {
         }
         Node::Global(instance, body.root)
     }
-    fn instantiate_package_captures(
+    /// Instantiates a package, moving its captures straight into the first
+    /// slots of its new instance, and returns its root.
+    fn instantiate_package(
         &mut self,
         package: Index<Linked, OnceLock<Package<Linked>>>,
-        captures: Node<Linked>,
+        captures: Captures<'_>,
     ) -> Node<Linked> {
         let package = self.arena().get(package).get().unwrap();
         let num_vars = package.num_vars;
         let body = LinkedPackageBody::from(&package.body);
-        let captures_in = package.captures;
+        let slots = package.captures;
         let instance = Instance::new(num_vars);
-        let root = self.instantiate_linked_package_body(instance.clone(), body);
-        self.link(Node::Global(instance, captures_in), captures);
-        root
+        match captures {
+            Captures::Global(outer, items) => {
+                debug_assert_eq!(items.0.1, slots.0.1, "mismatched package captures");
+                for (i, (item, slot)) in items.zip(slots).enumerate() {
+                    let inner_slot = &instance.vars.0[i];
+                    let variable = match self.arena().get(item) {
+                        Global::Variable(index) => Some(*index),
+                        _ => None,
+                    };
+                    match variable {
+                        Some(index) => {
+                            // Move the captured variable's node over if it's there already,
+                            // otherwise make it go to the new slot once it arrives.
+                            let outer_slot = &outer.vars.0[index];
+                            match outer_slot.take() {
+                                Some(node) => {
+                                    inner_slot.put(node);
+                                }
+                                None => {
+                                    let forward = Node::Global(instance.clone(), slot);
+                                    if let Some((a, b)) = outer_slot.put(forward) {
+                                        self.link(a, b);
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            inner_slot.put(Node::Global(outer.clone(), item));
+                        }
+                    }
+                }
+            }
+            Captures::Shared(shared) => {
+                debug_assert_eq!(shared.len(), slots.0.1, "mismatched package captures");
+                for (i, shared) in shared.iter().enumerate() {
+                    instance.vars.0[i].put(Node::Shared(shared.clone()));
+                }
+            }
+        }
+        self.instantiate_linked_package_body(instance, body)
     }
 
     // Share-related methods
@@ -613,15 +663,15 @@ impl Runtime {
                 Global::Fanout(..) => None,
                 Global::Close { .. } => None,
                 Global::Package(package, captures, FanBehavior::Expand) => {
-                    let root = self.instantiate_package_captures(
-                        package.clone(),
-                        Node::Global(instance, captures.clone()),
-                    );
+                    let root =
+                        self.instantiate_package(*package, Captures::Global(instance, *captures));
                     self.share_inner(root)
                 }
                 Global::Package(package, captures, FanBehavior::Propagate) => {
                     self.rewrites.share_sync += 1;
-                    let captures = self.share_inner(Node::Global(instance, *captures))?;
+                    let captures = captures
+                        .map(|capture| self.share_inner(Node::Global(instance.clone(), capture)))
+                        .collect::<Option<Box<[_]>>>()?;
                     Some(Shared::Sync(Arc::new(SyncShared::Package(
                         *package, captures,
                     ))))
@@ -728,11 +778,11 @@ impl Runtime {
     fn interact_instantiate(
         &mut self,
         package: PackagePtr<Linked>,
-        captures_in: Node<Linked>,
+        captures: Captures<'_>,
         other: Node<Linked>,
     ) {
         self.rewrites.instantiate += 1;
-        let root = self.instantiate_package_captures(package, captures_in);
+        let root = self.instantiate_package(package, captures);
         self.link(root, other);
     }
     fn lookup_case_branch(
@@ -957,8 +1007,7 @@ impl Runtime {
                     unreachable!()
                 };
                 self.rewrites.instantiate += 1;
-                let root =
-                    self.instantiate_package_captures(*package, Node::Shared(captures.clone()));
+                let root = self.instantiate_package(*package, Captures::Shared(captures));
                 return Ok(Some((root, b)));
             }
             (Some(ga), None) if instantiates_shared(ga, &b) => {
@@ -969,8 +1018,7 @@ impl Runtime {
                     unreachable!()
                 };
                 self.rewrites.instantiate += 1;
-                let root =
-                    self.instantiate_package_captures(*package, Node::Shared(captures.clone()));
+                let root = self.instantiate_package(*package, Captures::Shared(captures));
                 return Ok(Some((root, a)));
             }
             (Some(Global::Destruct(GlobalCont::Continue)), gb) if is_break(gb, &b) => {
@@ -1119,13 +1167,13 @@ impl Runtime {
                 NodeRef::Global(
                     instance,
                     _,
-                    Global::Package(package, captures_in, FanBehavior::Expand)
+                    Global::Package(package, captures, FanBehavior::Expand)
                 ),
                 other
             ) => {
                 self.interact_instantiate(
                     *package,
-                    Node::Global(instance, *captures_in),
+                    Captures::Global(instance, *captures),
                     other.into_node(),
                 );
             }
@@ -1146,10 +1194,13 @@ impl Runtime {
                 )
             ) => {
                 self.rewrites.fanout += 1;
-                self.link(
-                    Node::Global(value_instance, *captures),
-                    Node::Global(close_instance, *erase),
-                );
+                let (captures, erase) = (*captures, *erase);
+                for capture in captures {
+                    self.link(
+                        Node::Global(value_instance.clone(), capture),
+                        Node::Global(close_instance.clone(), erase),
+                    );
+                }
             }
             sym!(
                 NodeRef::Global(_, _, Global::Close { .. }),
@@ -1209,7 +1260,7 @@ impl Runtime {
                 NodeRef::Global(
                     package_instance,
                     _,
-                    Global::Package(package, captures_in, FanBehavior::Propagate)
+                    Global::Package(package, captures, FanBehavior::Propagate)
                 ),
                 NodeRef::Global(
                     unbox_instance,
@@ -1218,13 +1269,11 @@ impl Runtime {
                 )
             ) => {
                 let package = *package;
-                let captures_in = *captures_in;
+                let captures = *captures;
                 let continuation = *continuation;
                 self.rewrites.instantiate += 1;
-                let root = self.instantiate_package_captures(
-                    package,
-                    Node::Global(package_instance, captures_in),
-                );
+                let root =
+                    self.instantiate_package(package, Captures::Global(package_instance, captures));
                 self.link(root, Node::Global(unbox_instance, continuation));
             }
             sym!(
@@ -1235,23 +1284,21 @@ impl Runtime {
                     Global::Destruct(GlobalCont::Unbox(continuation))
                 )
             ) if matches!(shared.as_ref(), SyncShared::Package(..)) => {
-                let SyncShared::Package(package, captures_in) = shared.as_ref() else {
+                let SyncShared::Package(package, captures) = shared.as_ref() else {
                     unreachable!()
                 };
-                let package = *package;
-                let captures_in = captures_in.clone();
                 let continuation = *continuation;
                 self.rewrites.instantiate += 1;
-                let root = self.instantiate_package_captures(package, Node::Shared(captures_in));
+                let root = self.instantiate_package(*package, Captures::Shared(captures));
                 self.link(root, Node::Global(unbox_instance, continuation));
             }
             sym!(
-                NodeRef::Global(instance, _, Global::Package(package, captures_in, _)),
+                NodeRef::Global(instance, _, Global::Package(package, captures, _)),
                 other
             ) => {
                 self.interact_instantiate(
                     *package,
-                    Node::Global(instance, *captures_in),
+                    Captures::Global(instance, *captures),
                     other.into_node(),
                 );
             }
@@ -1259,14 +1306,10 @@ impl Runtime {
                 if matches!(&*x, SyncShared::Package(..)) =>
             {
                 self.rewrites.instantiate += 1;
-                let SyncShared::Package(package, captures_in) = &*x else {
+                let SyncShared::Package(package, captures) = &*x else {
                     unreachable!()
                 };
-                self.interact_instantiate(
-                    *package,
-                    Node::Shared(captures_in.clone()),
-                    other.into_node(),
-                );
+                self.interact_instantiate(*package, Captures::Shared(captures), other.into_node());
             }
 
             sym!(
@@ -1455,11 +1498,9 @@ impl Runtime {
                 let value = match node {
                     NodeRef::Linear(Linear::Value(v)) => Ok(*v),
                     NodeRef::Shared(Shared::Sync(shared)) => match &*shared {
-                        SyncShared::Package(package, shared) => {
-                            let node = self.instantiate_package_captures(
-                                *package,
-                                Node::Shared(shared.clone()),
-                            );
+                        SyncShared::Package(package, captures) => {
+                            let node =
+                                self.instantiate_package(*package, Captures::Shared(captures));
                             let Node::Global(instance, global_index) = node else {
                                 unreachable!("should be global")
                             };
@@ -1513,11 +1554,9 @@ impl Runtime {
                         (a, b)
                     }
                     NodeRef::Shared(Shared::Sync(shared)) => match &*shared {
-                        SyncShared::Package(package, shared) => {
-                            let node = self.instantiate_package_captures(
-                                *package,
-                                Node::Shared(shared.clone()),
-                            );
+                        SyncShared::Package(package, captures) => {
+                            let node =
+                                self.instantiate_package(*package, Captures::Shared(captures));
                             let value = self.destruct(node).expect("Expected value");
                             let Value::Pair(a, b) = value else {
                                 unreachable!("Expected pair")
@@ -1607,7 +1646,7 @@ impl Shared<Linked> {
 impl SyncShared<Linked> {
     pub fn variant_name(&self) -> String {
         match self {
-            SyncShared::Package(_, inner) => format!("Package({})", inner.variant_name()),
+            SyncShared::Package(_, captures) => format!("Package({} captures)", captures.len()),
             SyncShared::Value(v) => format!("Value({})", v.variant_name()),
         }
     }

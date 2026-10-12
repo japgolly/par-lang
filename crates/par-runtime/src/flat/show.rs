@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::flat::arena::Arena;
+use crate::flat::arena::{Arena, Index};
 use crate::flat::runtime::{
     Global, GlobalPtr, Linear, Node, PackageBody, Shared, SyncShared, Value,
 };
@@ -165,6 +165,28 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
             }
         };
         Ok(())
+    }
+}
+
+impl<'a, 'b, Ext: Clone> std::fmt::Display
+    for Showable<'a, 'b, &'a Index<Ext, [Global<Ext>]>, Ext>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<")?;
+        for global in self.1.arena.get(self.0.clone()) {
+            write!(f, "{} ", Showable(global, self.1))?;
+        }
+        write!(f, ">")
+    }
+}
+
+impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Box<[Shared<Ext>]>, Ext> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<")?;
+        for shared in self.0.iter() {
+            write!(f, "{} ", Showable(shared, self.1))?;
+        }
+        write!(f, ">")
     }
 }
 

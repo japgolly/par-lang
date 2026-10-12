@@ -1,5 +1,7 @@
 use super::reducer::{NetHandle, ReducerMessage};
-use super::runtime::{ExternalFn, Global, GlobalCont, Linear, Node, PackagePtr, Slot, Value};
+use super::runtime::{
+    Captures, ExternalFn, Global, GlobalCont, Linear, Node, PackagePtr, Slot, Value,
+};
 use crate::data::Data;
 use crate::flat::arena::{Arena, Index};
 use crate::flat::runtime::Linker;
@@ -64,10 +66,7 @@ impl Handle {
 
     pub fn from_package(net: NetHandle, package: PackagePtr<Linked>) -> Result<Handle> {
         let mut linker = HandleLinker { net };
-        let root = linker.instantiate_package_captures(
-            package,
-            Node::Linear(Linear::Value(Box::new(Value::Break))),
-        );
+        let root = linker.instantiate_package(package, Captures::Shared(&[]));
         Ok(Self { linker, node: root })
     }
 
