@@ -376,9 +376,19 @@ async fn run_accept_loop(
     listener: TcpListener,
     mut control: ListenerControl,
 ) -> Result<(), String> {
+    // Register for the shutdown notification once, before checking the flag, so that a
+    // shutdown triggered at any point isn't missed: `notify_waiters` only wakes already
+    // registered waiters.
+    let notify = Arc::clone(&control.notify);
+    let shutdown = notify.notified();
+    tokio::pin!(shutdown);
+    shutdown.as_mut().enable();
+    if control.is_shutdown() {
+        return Ok(());
+    }
     loop {
         tokio::select! {
-            _ = control.notify.notified() => {
+            _ = &mut shutdown => {
                 break Ok(());
             }
             accept_res = listener.accept() => {

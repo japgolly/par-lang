@@ -185,8 +185,16 @@ impl PipeReaderState {
     }
 
     async fn wait_result(&self) {
-        while !self.result_ready.load(AtomicOrdering::SeqCst) && !self.error_present() {
-            self.notify.notified().await;
+        loop {
+            // Register for notifications before checking, so that a result set in between
+            // isn't missed: `notify_waiters` only wakes already registered waiters.
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.result_ready.load(AtomicOrdering::SeqCst) || self.error_present() {
+                return;
+            }
+            notified.await;
         }
     }
 
