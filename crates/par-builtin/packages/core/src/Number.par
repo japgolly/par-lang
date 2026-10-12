@@ -9,6 +9,8 @@ export {
 
   dec Mul : [<a: number> (a) a] a
 
+  // Divides two numbers. Dividing `Nat`s or `Int`s rounds down, consistently with
+  // `Int.Mod`, and dividing them by zero gives zero.
   dec Div : [<a: number> (a) a] a
 
   dec Neg : [<a: signed> a] a

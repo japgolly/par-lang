@@ -3,6 +3,9 @@ module Builtins
 import {
   @core/Bool
   @core/Bytes
+  @core/Float
+  @core/Int
+  @core/Number
   @core/String
   @core/Test
   @core/Url
@@ -50,3 +53,18 @@ def TestFetchRejectsInvalidRequests: [Test] ! = [test]
       test.assert("an invalid method is rejected", badMethod is .err _)
     } in test.done,
   }
+
+def TestIntDivisionRoundsDown: [Test] ! = [test] do {
+  let x: Int = -7
+  test.assert("-7 / 2 rounds down", x / 2 == -4)
+  test.assert("division agrees with Int.Mod", {x / 2} * 2 + Int.Mod(x, 2) == x)
+  test.assert("7 / 2 rounds down", 7 / 2 == 3)
+  test.assert("dividing by zero gives zero", x / 0 == 0)
+} in test.done
+
+def TestZeroTimesFloat: [Test] ! = [test] do {
+  let zero = Number.Zero(type Float)
+  test.assert("zero times NaN is NaN", Float.IsNaN(zero * Float.NaN))
+  test.assert("zero times infinity is NaN", Float.IsNaN(Float.Inf * zero))
+  test.assert("zero times a number is zero", zero * 5.0 == 0.0)
+} in test.done

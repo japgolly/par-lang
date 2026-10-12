@@ -116,6 +116,9 @@ def Negative = neg 5
 The operators `+`, `*`, and `/` work on `Nat`, `Int`, and `Float`.
 The operators `-` and `neg` work on signed numbers: `Int` and `Float`.
 
+Dividing `Nat`s or `Int`s rounds down, consistently with `Int.Mod`, so `-7 / 2` is `-4`.
+Since Par has no runtime errors, dividing them by zero gives `0`.
+
 Comparisons work on primitive values too:
 
 ```par

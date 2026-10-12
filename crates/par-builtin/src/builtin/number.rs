@@ -1,5 +1,6 @@
 //package: core
 use num_bigint::BigInt;
+use num_integer::Integer;
 use par_runtime::external_def;
 use par_runtime::primitive::Number;
 use par_runtime::readback::Handle;
@@ -69,7 +70,9 @@ async fn number_mul(mut handle: Handle) {
             Number::Int(BigInt::ZERO)
         }
         (Number::Int(x), Number::Int(y)) => Number::Int(x * y),
-        (Number::Zero, Number::Float(_)) | (Number::Float(_), Number::Zero) => Number::Float(0.0),
+        // Multiplying by zero keeps NaN and infinities producing NaN.
+        (Number::Zero, Number::Float(y)) => Number::Float(0.0 * y),
+        (Number::Float(x), Number::Zero) => Number::Float(x * 0.0),
         (Number::Float(x), Number::Float(y)) => Number::Float(x * y),
         _ => panic!("Invalid generic number combination"),
     };
@@ -90,7 +93,8 @@ async fn number_div(mut handle: Handle) {
             if y == BigInt::ZERO {
                 Number::Int(BigInt::ZERO)
             } else {
-                Number::Int(x / y)
+                // Rounds down, consistently with `Int.Mod`.
+                Number::Int(x.div_floor(&y))
             }
         }
         (Number::Zero, Number::Float(y)) => Number::Float(0.0 / y),
