@@ -485,7 +485,9 @@ fn main() -> ExitCode {
                 .get_one::<u32>("max_interactions")
                 .cloned()
                 .unwrap_or(MAX_INTERACTIONS_DEFAULT);
-            run_definition(package, target, stats, max_interactions);
+            if run_definition(package, target, stats, max_interactions).is_err() {
+                return ExitCode::FAILURE;
+            }
         }
         Some(("compile", args)) => {
             let package = args.get_one::<PathBuf>("package").unwrap().clone();
@@ -493,13 +495,17 @@ fn main() -> ExitCode {
                 .get_one::<u32>("max_interactions")
                 .cloned()
                 .unwrap_or(MAX_INTERACTIONS_DEFAULT);
-            compile(package, max_interactions);
+            if compile(package, max_interactions).is_err() {
+                return ExitCode::FAILURE;
+            }
         }
         Some(("run-vm", args)) => {
             let stats = *args.get_one::<bool>("stats").unwrap();
             let file = args.get_one::<PathBuf>("file").unwrap().clone();
             let target = args.get_one::<String>("target").cloned();
-            run_definition_vm(file, target, stats);
+            if run_definition_vm(file, target, stats).is_err() {
+                return ExitCode::FAILURE;
+            }
         }
         Some(("check", args)) => {
             let package = args.get_one::<PathBuf>("package").unwrap().clone();
@@ -649,38 +655,38 @@ fn run_definition(
     target: Option<String>,
     print_stats: bool,
     max_interactions: u32,
-) {
+) -> Result<(), ()> {
     let runtime = tokio_factory::create_runtime().expect("Failed to create Tokio runtime");
     runtime.block_on(async {
         let (checked, rt_compiled, local_modules) =
             match build_runtime_package(&package_path, max_interactions) {
                 Ok((checked, rt_compiled, local_modules)) => (checked, rt_compiled, local_modules),
                 Err(error) => {
-                    println!("{}", error.display());
-                    return;
+                    eprintln!("{}", error.display());
+                    return Err(());
                 }
             };
 
         let Some(name) = resolve_target_definition(target.as_deref(), &checked, &local_modules)
         else {
             let target = target.unwrap_or_else(|| "Main.Main".to_string());
-            println!("{}: {}", "Definition not found".bright_red(), target);
-            return;
+            eprintln!("{}: {}", "Definition not found".bright_red(), target);
+            return Err(());
         };
 
         let Some(Type::Break(_)) = rt_compiled.get_type_of(name) else {
-            println!(
+            eprintln!(
                 "{}: {}",
                 "Definition does not have the unit (!) type".bright_red(),
                 target.unwrap_or_else(|| "Main.Main".to_string())
             );
-            return;
+            return Err(());
         };
 
         let package_to_run = match rt_compiled.code.name_to_package.get(name) {
             Some(TranspiledGlobal::Package(pkg)) => pkg.clone(),
             Some(TranspiledGlobal::Unimplemented) => {
-                println!(
+                eprintln!(
                     "{}",
                     format!(
                         "Definition {} is incomplete (directly or indirectly contains a todo; run `par check` for details)",
@@ -688,10 +694,10 @@ fn run_definition(
                     )
                     .bright_red()
                 );
-                return;
+                return Err(());
             }
             None => {
-                println!(
+                eprintln!(
                     "{}",
                     format!(
                         "Definition {} not found",
@@ -699,7 +705,7 @@ fn run_definition(
                     )
                     .bright_red()
                 );
-                return;
+                return Err(());
             }
         };
         let start = Instant::now();
@@ -721,21 +727,43 @@ fn run_definition(
             eprintln!("{}", stats.show(start.elapsed()));
             eprintln!("\tArena size: {}", rt_compiled.code.arena.memory_size());
         }
-    });
+        Ok(())
+    })
 }
 
-fn run_definition_vm(binary_path: PathBuf, target: Option<String>, print_stats: bool) {
+fn run_definition_vm(
+    binary_path: PathBuf,
+    target: Option<String>,
+    print_stats: bool,
+) -> Result<(), ()> {
     let runtime = tokio_factory::create_runtime().expect("Failed to create Tokio runtime");
     runtime.block_on(async {
-        let file = File::open(binary_path).expect("Failed to open file");
-        let reader = BufReader::new(file);
-        let artifact: Artifact<Unlinked> =
-            bincode::deserialize_from(reader).expect("Failed to deserialize artifact");
+        let file = match File::open(&binary_path) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    format!("Failed to open {}: {error}", binary_path.display()).bright_red()
+                );
+                return Err(());
+            }
+        };
+        let artifact: Artifact<Unlinked> = match bincode::deserialize_from(BufReader::new(file))
+        {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    format!("Failed to read {}: {error}", binary_path.display()).bright_red()
+                );
+                return Err(());
+            }
+        };
         let artifact = match artifact.link() {
             Ok(artifact) => artifact,
             Err(error) => {
-                println!("{}", error.to_string().bright_red());
-                return;
+                eprintln!("{}", error.to_string().bright_red());
+                return Err(());
             }
         };
 
@@ -749,15 +777,15 @@ fn run_definition_vm(binary_path: PathBuf, target: Option<String>, print_stats: 
         let package_to_run = match artifact.definition_to_package.get(&target) {
             Some(ArtifactGlobal::Package(pkg)) => pkg,
             Some(ArtifactGlobal::Unimplemented) => {
-                println!(
+                eprintln!(
                     "{}",
                     format!("Definition {target} is incomplete (directly or indirectly contains a todo; run `par check` for details)").bright_red()
                 );
-                return;
+                return Err(());
             }
             None => {
-                println!("{}", format!("Definition {target} not found").bright_red());
-                return;
+                eprintln!("{}", format!("Definition {target} not found").bright_red());
+                return Err(());
             }
         };
         let start_runtime = if print_stats {
@@ -778,27 +806,44 @@ fn run_definition_vm(binary_path: PathBuf, target: Option<String>, print_stats: 
             eprintln!("{}", stats.show(start.elapsed()));
             eprintln!("\tArena size: {}", artifact.arena.memory_size());
         }
-    });
+        Ok(())
+    })
 }
 
-fn compile(package_path: PathBuf, max_interactions: u32) {
+fn compile(package_path: PathBuf, max_interactions: u32) -> Result<(), ()> {
     let (checked, rt_compiled, _local_modules, _sources) =
         match build_unlinked_package(&package_path, max_interactions) {
             Ok((checked, rt_compiled, local_modules, sources)) => {
                 (checked, rt_compiled, local_modules, sources)
             }
             Err(error) => {
-                println!("{}", error.display());
-                return;
+                eprintln!("{}", error.display());
+                return Err(());
             }
         };
 
     let artifact: Artifact<Unlinked> = rt_compiled
         .code
         .into_artifact(checked.workspace().root_package());
-    let file = File::create("compiled.pvm").expect("Failed to create file");
-    let writer = BufWriter::new(file);
-    bincode::serialize_into(writer, &artifact).expect("Failed to serialize");
+    let output_path = PathBuf::from("compiled.pvm");
+    let file = match File::create(&output_path) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!(
+                "{}",
+                format!("Failed to create {}: {error}", output_path.display()).bright_red()
+            );
+            return Err(());
+        }
+    };
+    if let Err(error) = bincode::serialize_into(BufWriter::new(file), &artifact) {
+        eprintln!(
+            "{}",
+            format!("Failed to write {}: {error}", output_path.display()).bright_red()
+        );
+        return Err(());
+    }
+    Ok(())
 }
 
 fn resolve_target_definition<'a>(
