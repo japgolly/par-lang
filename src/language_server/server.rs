@@ -107,23 +107,28 @@ impl<'c> LanguageServer<'c> {
                 let params = extract_request::<ExecuteCommand>(request);
                 match params.command.as_str() {
                     "run" => {
-                        let Some(uri_str) = params.arguments.get(0).and_then(|v| v.as_str()) else {
-                            return;
-                        };
-                        let Some(def_name) = params.arguments.get(1).and_then(|v| v.as_str())
-                        else {
-                            return;
-                        };
-                        let Ok(uri) = Uri::from_str(uri_str) else {
-                            return;
-                        };
-                        self.handle_request_instance(request_id, &uri, |instance| {
-                            instance.run_in_playground(def_name)
-                        })
+                        let uri = params.arguments.get(0).and_then(|v| v.as_str());
+                        let def_name = params.arguments.get(1).and_then(|v| v.as_str());
+                        match (uri.map(Uri::from_str), def_name) {
+                            (Some(Ok(uri)), Some(def_name)) => {
+                                self.handle_request_instance(request_id, &uri, |instance| {
+                                    instance.run_in_playground(def_name)
+                                })
+                            }
+                            _ => lsp_server::Response::new_err(
+                                request_id,
+                                ErrorCode::InvalidParams as i32,
+                                String::from("`run` expects a document URI and a definition name"),
+                            ),
+                        }
                     }
                     _ => {
                         tracing::warn!("Unhandled command: {:?}", params);
-                        return;
+                        lsp_server::Response::new_err(
+                            request_id,
+                            ErrorCode::InvalidParams as i32,
+                            format!("unknown command `{}`", params.command),
+                        )
                     }
                 }
             }
@@ -143,7 +148,11 @@ impl<'c> LanguageServer<'c> {
             }
             _ => {
                 tracing::warn!("Unhandled request: {:?}", request);
-                return;
+                lsp_server::Response::new_err(
+                    request_id,
+                    ErrorCode::MethodNotFound as i32,
+                    format!("unsupported request `{method}`"),
+                )
             }
         };
 
