@@ -95,41 +95,39 @@ impl<'a> AsyncByteIterator for ReaderRemainderByteIterator<'a> {
         }
 
         // Request more bytes from the underlying reader
-        loop {
-            let handle = self.remainder.handle.as_mut().unwrap();
-            handle.signal(literal!("read"));
-            match handle.case().await.as_str() {
-                "ok" => match handle.case().await.as_str() {
-                    "chunk" => {
-                        let chunk = handle.receive().bytes().await;
-                        assert!(
-                            !chunk.is_empty(),
-                            "Bytes.Reader returned an empty chunk; implementation bug"
-                        );
-                        self.remainder.buffer.extend(chunk.as_ref());
-                        // After extending by a non-empty chunk, the current index must be valid
-                        let b = *self
-                            .remainder
-                            .buffer
-                            .get(self.index)
-                            .expect("buffer should contain data at current index");
-                        self.index += 1;
-                        return Ok(Some((self.index - 1, b)));
-                    }
-                    "end" => {
-                        // Close the provider side of the 'end' branch
-                        self.remainder.handle.take().unwrap().continue_();
-                        return Ok(None);
-                    }
-                    _ => unreachable!(),
-                },
-                "err" => {
-                    // Propagate the opaque error handle upward without receiving
-                    let err = self.remainder.handle.take().unwrap();
-                    return Err(err);
+        let handle = self.remainder.handle.as_mut().unwrap();
+        handle.signal(literal!("read"));
+        match handle.case().await.as_str() {
+            "ok" => match handle.case().await.as_str() {
+                "chunk" => {
+                    let chunk = handle.receive().bytes().await;
+                    assert!(
+                        !chunk.is_empty(),
+                        "Bytes.Reader returned an empty chunk; implementation bug"
+                    );
+                    self.remainder.buffer.extend(chunk.as_ref());
+                    // After extending by a non-empty chunk, the current index must be valid
+                    let b = *self
+                        .remainder
+                        .buffer
+                        .get(self.index)
+                        .expect("buffer should contain data at current index");
+                    self.index += 1;
+                    return Ok(Some((self.index - 1, b)));
+                }
+                "end" => {
+                    // Close the provider side of the 'end' branch
+                    self.remainder.handle.take().unwrap().continue_();
+                    return Ok(None);
                 }
                 _ => unreachable!(),
+            },
+            "err" => {
+                // Propagate the opaque error handle upward without receiving
+                let err = self.remainder.handle.take().unwrap();
+                return Err(err);
             }
+            _ => unreachable!(),
         }
     }
 }

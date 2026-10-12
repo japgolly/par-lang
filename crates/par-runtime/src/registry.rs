@@ -96,7 +96,7 @@ macro_rules! external_def {
     (@$($path:ident)/+.$name:ident => $f:ident) => {
         $crate::external_def! { @$($path)/+.$name => $f() }
     };
-    (@$($path:ident)/+.$name:ident => $f:ident($(arg:expr),+ ,)) => {
+    (@$($path:ident)/+.$name:ident => $f:ident($($arg:expr),+ ,)) => {
         $crate::external_def! { @$($path)/+.$name => $f($($arg),+) }
     };
 

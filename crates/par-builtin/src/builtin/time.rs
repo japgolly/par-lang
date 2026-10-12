@@ -96,18 +96,16 @@ fn provide_instant(handle: Handle, timestamp: Timestamp) {
     handle.provide_box(move |mut handle| {
         let timestamp = timestamp;
         async move {
-            loop {
-                match handle.case().await.as_str() {
-                    "unixNanos" => {
-                        handle.provide_int(BigInt::from(timestamp.as_nanosecond()));
-                        return;
-                    }
-                    "add" => {
-                        let duration = bigint_to_i128_sat(&handle.receive().int().await);
-                        return provide_instant(handle, timestamp_shift(timestamp, duration));
-                    }
-                    _ => unreachable!(),
+            match handle.case().await.as_str() {
+                "unixNanos" => {
+                    handle.provide_int(BigInt::from(timestamp.as_nanosecond()));
+                    return;
                 }
+                "add" => {
+                    let duration = bigint_to_i128_sat(&handle.receive().int().await);
+                    return provide_instant(handle, timestamp_shift(timestamp, duration));
+                }
+                _ => unreachable!(),
             }
         }
     });
@@ -184,69 +182,67 @@ fn provide_zoned(handle: Handle, zoned: Zoned) {
     handle.provide_box(move |mut handle| {
         let zoned = zoned.clone();
         async move {
-            loop {
-                match handle.case().await.as_str() {
-                    "year" => {
-                        handle.provide_int(BigInt::from(zoned.year()));
-                        return;
-                    }
-                    "month" => {
-                        handle.provide_nat(BigUint::from(zoned.month() as u8));
-                        return;
-                    }
-                    "day" => {
-                        handle.provide_nat(BigUint::from(zoned.day() as u8));
-                        return;
-                    }
-                    "hour" => {
-                        handle.provide_nat(BigUint::from(zoned.hour() as u8));
-                        return;
-                    }
-                    "minute" => {
-                        handle.provide_nat(BigUint::from(zoned.minute() as u8));
-                        return;
-                    }
-                    "second" => {
-                        handle.provide_nat(BigUint::from(zoned.second() as u8));
-                        return;
-                    }
-                    "nanosecond" => {
-                        handle.provide_nat(BigUint::from(zoned.subsec_nanosecond() as u32));
-                        return;
-                    }
-                    "weekday" => {
-                        handle.signal(weekday_label(zoned.weekday()));
-                        handle.break_();
-                        return;
-                    }
-                    "zone" => {
-                        return provide_zone(handle, zoned.time_zone().clone());
-                    }
-                    "instant" => {
-                        return provide_instant(handle, zoned.timestamp());
-                    }
-                    "format" => {
-                        let layout = handle.receive().string().await;
-                        let rendered = BrokenDownTime::from(&zoned)
-                            .to_string_with_config(&Config::new().lenient(true), layout.as_str())
-                            .unwrap_or_else(|_| layout.as_str().to_owned());
-                        handle.provide_string(ParString::from(rendered));
-                        return;
-                    }
-                    "addYears" => {
-                        let amount = handle.receive().int().await;
-                        return provide_zoned(handle, add_calendar(&zoned, &amount, 'y'));
-                    }
-                    "addMonths" => {
-                        let amount = handle.receive().int().await;
-                        return provide_zoned(handle, add_calendar(&zoned, &amount, 'm'));
-                    }
-                    "addDays" => {
-                        let amount = handle.receive().int().await;
-                        return provide_zoned(handle, add_calendar(&zoned, &amount, 'd'));
-                    }
-                    _ => unreachable!(),
+            match handle.case().await.as_str() {
+                "year" => {
+                    handle.provide_int(BigInt::from(zoned.year()));
+                    return;
                 }
+                "month" => {
+                    handle.provide_nat(BigUint::from(zoned.month() as u8));
+                    return;
+                }
+                "day" => {
+                    handle.provide_nat(BigUint::from(zoned.day() as u8));
+                    return;
+                }
+                "hour" => {
+                    handle.provide_nat(BigUint::from(zoned.hour() as u8));
+                    return;
+                }
+                "minute" => {
+                    handle.provide_nat(BigUint::from(zoned.minute() as u8));
+                    return;
+                }
+                "second" => {
+                    handle.provide_nat(BigUint::from(zoned.second() as u8));
+                    return;
+                }
+                "nanosecond" => {
+                    handle.provide_nat(BigUint::from(zoned.subsec_nanosecond() as u32));
+                    return;
+                }
+                "weekday" => {
+                    handle.signal(weekday_label(zoned.weekday()));
+                    handle.break_();
+                    return;
+                }
+                "zone" => {
+                    return provide_zone(handle, zoned.time_zone().clone());
+                }
+                "instant" => {
+                    return provide_instant(handle, zoned.timestamp());
+                }
+                "format" => {
+                    let layout = handle.receive().string().await;
+                    let rendered = BrokenDownTime::from(&zoned)
+                        .to_string_with_config(&Config::new().lenient(true), layout.as_str())
+                        .unwrap_or_else(|_| layout.as_str().to_owned());
+                    handle.provide_string(ParString::from(rendered));
+                    return;
+                }
+                "addYears" => {
+                    let amount = handle.receive().int().await;
+                    return provide_zoned(handle, add_calendar(&zoned, &amount, 'y'));
+                }
+                "addMonths" => {
+                    let amount = handle.receive().int().await;
+                    return provide_zoned(handle, add_calendar(&zoned, &amount, 'm'));
+                }
+                "addDays" => {
+                    let amount = handle.receive().int().await;
+                    return provide_zoned(handle, add_calendar(&zoned, &amount, 'd'));
+                }
+                _ => unreachable!(),
             }
         }
     });
