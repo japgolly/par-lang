@@ -22,3 +22,4 @@ im = "15"
 inventory = "0.3.22"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.8"
+toml_edit = "0.22"

@@ -359,7 +359,7 @@ fn add_remote_dependency_with_fetcher(
     })?;
     let destination = layout.managed_remote_dependency_path(&source);
 
-    let mut manifest = PackageManifest::read_from(&layout.manifest_path)
+    let manifest = PackageManifest::read_from(&layout.manifest_path)
         .map_err(PackageManagerError::Discovery)?;
     if let Some(alias) = find_existing_remote_alias(&manifest.dependencies, &source) {
         let fetched_dependencies = sync_dependencies_with_fetcher(&layout.root_dir, fetcher)?;
@@ -399,11 +399,21 @@ fn add_remote_dependency_with_fetcher(
 
     let fetched_added_dependency = remote.install()?;
 
-    manifest.dependencies.insert(
-        declared_name.clone(),
-        DependencySpec::Remote(source.clone()),
-    );
-    fs::write(&layout.manifest_path, manifest.render()).map_err(|error| {
+    let manifest_source = fs::read_to_string(&layout.manifest_path).map_err(|error| {
+        PackageManagerError::Discovery(WorkspaceDiscoveryError::ManifestReadError {
+            path: layout.manifest_path.clone(),
+            message: error.to_string(),
+        })
+    })?;
+    let manifest_source =
+        PackageManifest::add_dependency(&manifest_source, &declared_name, &source.to_string())
+            .map_err(|message| {
+                PackageManagerError::Discovery(WorkspaceDiscoveryError::ManifestParseError {
+                    path: layout.manifest_path.clone(),
+                    message,
+                })
+            })?;
+    fs::write(&layout.manifest_path, manifest_source).map_err(|error| {
         PackageManagerError::FileWrite {
             path: layout.manifest_path.clone(),
             message: error.to_string(),
@@ -573,6 +583,31 @@ mod tests {
             copy_dir_all(source_path, destination);
             Ok(())
         }
+    }
+
+    #[test]
+    fn add_remote_dependency_keeps_the_rest_of_the_manifest() {
+        let root = temp_dir("add-keeps-manifest");
+        let manifest = "# The root package.\n[package]\nname = \"root\" # inline\n\n[dependencies]\nlocal = \"../local\" # a local one\n";
+        write_package(&root, manifest, &[("src/Main.par", "module Main\n")]);
+
+        let remote = temp_dir("remote-keeps-manifest");
+        write_package(
+            &remote,
+            "[package]\nname = \"pkg\"\n",
+            &[("src/Lib.par", "module Lib\n")],
+        );
+
+        let fetcher = FakeRemoteFetcher::default().with_package("github.com/example/pkg", remote);
+        // The local dependency doesn't exist, so syncing after adding fails. Only the
+        // written manifest matters here.
+        let _ = add_with_fetcher(&root, Some("github.com/example/pkg"), &fetcher);
+
+        let written = fs::read_to_string(root.join("Par.toml")).unwrap();
+        assert_eq!(
+            written,
+            format!("{manifest}pkg = \"github.com/example/pkg\"\n")
+        );
     }
 
     #[test]

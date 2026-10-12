@@ -20,7 +20,7 @@ use arcstr::ArcStr;
 use indexmap::{IndexMap, IndexSet};
 use par_runtime::linker::Unlinked;
 use par_runtime::pkgid::{BuiltinPackage, PackageId};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry};
 use std::fmt::{self, Display, Formatter, Write};
 use std::fs;
@@ -327,36 +327,30 @@ impl PackageManifest {
         })
     }
 
-    pub fn render(&self) -> String {
-        let manifest = ManifestToml {
-            package: ManifestPackageToml {
-                name: self.name.clone(),
-                __builtin: self.builtin,
-            },
-            dependencies: self
-                .dependencies
-                .iter()
-                .map(|(alias, dependency)| {
-                    let source = match dependency {
-                        DependencySpec::Local(path) => normalized_package_path(path),
-                        DependencySpec::Remote(source) => source.to_string(),
-                    };
-                    (alias.clone(), source)
-                })
-                .collect(),
-        };
-        toml::to_string(&manifest).expect("package manifest should serialize to TOML")
+    /// Adds a dependency to the source of a manifest, keeping everything else in it,
+    /// including comments and formatting, as it is.
+    pub fn add_dependency(source: &str, alias: &str, reference: &str) -> Result<String, String> {
+        let mut document = source
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| error.to_string())?;
+        let dependencies = document
+            .entry("dependencies")
+            .or_insert(toml_edit::table())
+            .as_table_like_mut()
+            .ok_or_else(|| "`dependencies` is not a table".to_string())?;
+        dependencies.insert(alias, toml_edit::value(reference));
+        Ok(document.to_string())
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ManifestToml {
     package: ManifestPackageToml,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default)]
     dependencies: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ManifestPackageToml {
     name: String,
     #[serde(default)]
