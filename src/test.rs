@@ -61,7 +61,13 @@ fn test_all_files() -> Result<(), String> {
         let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         d.push("tests");
         eprintln!("Testing {:?}", d);
-        if crate::test_runner::run_tests(d, None, None, 10_000) {
+        if crate::test_runner::run_tests(
+            d,
+            None,
+            None,
+            10_000,
+            Some(std::time::Duration::from_secs(60)),
+        ) {
             Ok(())
         } else {
             Err("Some tests failed".to_string())

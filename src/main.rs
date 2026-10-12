@@ -441,6 +441,11 @@ fn main() -> ExitCode {
                 )
                 .arg(arg!([target] "Test target: `path/to/Module` or `path/to/Module.TestName`"))
                 .arg(arg!(--filter <FILTER> "Only run tests matching this filter").required(false))
+                .arg(
+                    arg!(--timeout <SECONDS> "Fail tests running longer than this many seconds (0 for no limit)")
+                        .value_parser(value_parser!(u64))
+                        .default_value("60"),
+                )
                 .arg(arg!(--max_interactions <MAX_INTERACTIONS> "Maximum number of interactions during compilation")
             .value_parser(value_parser!(u32))),
         )
@@ -545,7 +550,11 @@ fn main() -> ExitCode {
                 .get_one::<u32>("max_interactions")
                 .cloned()
                 .unwrap_or(MAX_INTERACTIONS_DEFAULT);
-            if !run_tests(package, target, filter.cloned(), max_interactions) {
+            let timeout = match *args.get_one::<u64>("timeout").unwrap() {
+                0 => None,
+                seconds => Some(std::time::Duration::from_secs(seconds)),
+            };
+            if !run_tests(package, target, filter.cloned(), max_interactions, timeout) {
                 return ExitCode::FAILURE;
             }
         }
@@ -1084,6 +1093,7 @@ fn run_tests(
     target: Option<String>,
     filter: Option<String>,
     max_interactions: u32,
+    timeout: Option<std::time::Duration>,
 ) -> bool {
-    test_runner::run_tests(package_path, target, filter, max_interactions)
+    test_runner::run_tests(package_path, target, filter, max_interactions, timeout)
 }

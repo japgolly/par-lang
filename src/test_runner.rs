@@ -132,6 +132,7 @@ pub fn run_tests(
     target: Option<String>,
     filter: Option<String>,
     max_interactions: u32,
+    timeout: Option<Duration>,
 ) -> bool {
     set_miette_hook();
     println!(
@@ -193,8 +194,8 @@ pub fn run_tests(
 
     for (name, kind) in tests {
         let result = match kind {
-            DefinitionKind::Test => test_single_definition(&checked, &rt_compiled, &name),
-            DefinitionKind::Run => run_single_definition(&checked, &rt_compiled, &name),
+            DefinitionKind::Test => test_single_definition(&checked, &rt_compiled, &name, timeout),
+            DefinitionKind::Run => run_single_definition(&checked, &rt_compiled, &name, timeout),
         };
         total_tests += 1;
         if result.status.is_passed() {
@@ -275,10 +276,26 @@ fn test_single_definition(
     program: &CheckedWorkspace,
     rt_compiled: &Compiled<Linked>,
     test_name: &GlobalName<Universal>,
+    timeout: Option<Duration>,
+) -> TestResult {
+    let missing_type_name = test_name.to_string();
+    run_with_timeout(test_name, timeout, async {
+        let ty = rt_compiled
+            .get_type_of(test_name)
+            .ok_or_else(|| format!("Type not found for test '{}'", missing_type_name))?;
+        require_assignable_type(program, &ty, &test_type(), "[Test] !")?;
+        run_test(rt_compiled, test_name).await
+    })
+}
+
+/// Runs a test on its own runtime, failing it if it doesn't finish within the timeout.
+fn run_with_timeout(
+    name: &GlobalName<Universal>,
+    timeout: Option<Duration>,
+    test: impl Future<Output = Result<TestStatus, String>>,
 ) -> TestResult {
     let start = Instant::now();
-    let name_label = test_name.to_string();
-    let missing_type_name = name_label.clone();
+    let name_label = name.to_string();
     let runtime = match crate::tokio_factory::create_runtime() {
         Ok(rt) => rt,
         Err(e) => {
@@ -291,23 +308,23 @@ fn test_single_definition(
     };
 
     let result = runtime.block_on(async {
-        let ty = rt_compiled
-            .get_type_of(test_name)
-            .ok_or_else(|| format!("Type not found for test '{}'", missing_type_name))?;
-        require_assignable_type(program, &ty, &test_type(), "[Test] !")?;
-        run_test(rt_compiled, test_name).await
+        match timeout {
+            Some(timeout) => tokio::time::timeout(timeout, test)
+                .await
+                .unwrap_or_else(|_| Err(format!("Timed out after {:.1}s", timeout.as_secs_f32()))),
+            None => test.await,
+        }
     });
-
-    let duration = start.elapsed();
-    let final_result = match result {
-        Ok(status) => status,
-        Err(msg) => TestStatus::Failed(msg),
-    };
+    // Don't wait for whatever a timed out test left running.
+    runtime.shutdown_background();
 
     TestResult {
         name: name_label,
-        duration,
-        status: final_result,
+        duration: start.elapsed(),
+        status: match result {
+            Ok(status) => status,
+            Err(msg) => TestStatus::Failed(msg),
+        },
     }
 }
 
@@ -315,22 +332,10 @@ fn run_single_definition(
     program: &CheckedWorkspace,
     rt_compiled: &Compiled<Linked>,
     run_name: &GlobalName<Universal>,
+    timeout: Option<Duration>,
 ) -> TestResult {
-    let start = Instant::now();
-    let name_label = run_name.to_string();
-    let missing_type_name = name_label.clone();
-    let runtime = match crate::tokio_factory::create_runtime() {
-        Ok(rt) => rt,
-        Err(e) => {
-            return TestResult {
-                name: name_label,
-                duration: start.elapsed(),
-                status: TestStatus::Failed(format!("Failed to create runtime: {}", e)),
-            };
-        }
-    };
-
-    let result = runtime.block_on(async {
+    let missing_type_name = run_name.to_string();
+    run_with_timeout(run_name, timeout, async {
         let ty = rt_compiled
             .get_type_of(run_name)
             .ok_or_else(|| format!("Type not found for test '{}'", missing_type_name))?;
@@ -338,7 +343,9 @@ fn run_single_definition(
         let package = match rt_compiled.code.name_to_package.get(run_name) {
             Some(TranspiledGlobal::Package(pkg)) => pkg.clone(),
             Some(TranspiledGlobal::Unimplemented) => {
-                return Err(format!("Test '{missing_type_name}' is incomplete (directly or indirectly contains a todo; run `par check` for details)"));
+                return Err(format!(
+                    "Test '{missing_type_name}' is incomplete (directly or indirectly contains a todo; run `par check` for details)"
+                ));
             }
             None => return Err(format!("Test package not found for '{missing_type_name}'")),
         };
@@ -351,19 +358,7 @@ fn run_single_definition(
         handle.continue_();
         fut.await;
         Ok(TestStatus::PassedWithNoAssertions)
-    });
-
-    let duration = start.elapsed();
-    let final_result = match result {
-        Ok(status) => status,
-        Err(msg) => TestStatus::Failed(msg),
-    };
-
-    TestResult {
-        name: name_label,
-        duration,
-        status: final_result,
-    }
+    })
 }
 
 fn test_type() -> Type<Universal> {
