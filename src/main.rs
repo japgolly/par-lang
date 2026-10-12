@@ -15,7 +15,9 @@ use par_core::runtime::TranspiledGlobal;
 use par_core::{
     frontend::{Type, is_lowercase_identifier, set_miette_hook},
     runtime::RuntimeCompilerError,
-    workspace::{CheckedWorkspace, ModulePath, WorkspaceDiscoveryError, WorkspaceError},
+    workspace::{
+        CheckedWorkspace, ModulePath, PackageLayout, WorkspaceDiscoveryError, WorkspaceError,
+    },
 };
 use par_doc::DocOptions;
 use tokio::time::Instant;
@@ -395,7 +397,7 @@ fn main() -> ExitCode {
         )
         .subcommand(
             Command::new("compile")
-                .about("Compile a Par package")
+                .about("Compile a Par package into `compiled.pvm` in its root directory")
                 .arg(
                     arg!(--package <PACKAGE> "Path to package directory (or any file/directory inside it)")
                         .value_parser(value_parser!(PathBuf))
@@ -820,7 +822,13 @@ fn compile(package_path: PathBuf, max_interactions: u32) -> Result<(), ()> {
     let artifact: Artifact<Unlinked> = rt_compiled
         .code
         .into_artifact(checked.workspace().root_package());
-    let output_path = PathBuf::from("compiled.pvm");
+    let output_path = match PackageLayout::find_from(&package_path) {
+        Ok(layout) => layout.root_dir.join("compiled.pvm"),
+        Err(error) => {
+            eprintln!("{}", error.to_string().bright_red());
+            return Err(());
+        }
+    };
     let file = match File::create(&output_path) {
         Ok(file) => file,
         Err(error) => {
