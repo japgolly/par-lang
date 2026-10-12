@@ -6,6 +6,7 @@ import {
   @core/String
   @core/Test
   @core/Url
+  @basic/Http
 }
 
 // Dropping a linear value cleans up the builtin boxes inside it, instead of
@@ -35,3 +36,17 @@ def TestPipeReaderEmptyWrite: [Test] ! = [test] do {
   let result = String.ParseReader(reader)->String.Remainder
   test.assert("empty writes are skipped", result is .ok s and s == "ab")
 } in test.done
+
+// Header values are bytes, and requests that can't be sent are reported as errors,
+// before anything goes over the network.
+def TestFetchRejectsInvalidRequests: [Test] ! = [test]
+  Url.FromString("http://127.0.0.1:9").case {
+    .err _ => do { test.assert("the test URL parses", .false!) } in test.done,
+    .ok url => do {
+      let header = Bytes.Builder.add("a").add(<<10>>).build
+      let badHeader = Http.Fetch(("GET", url, *(("X-Test") header)) Bytes.EmptyReader)
+      test.assert("a header value with a newline is rejected", badHeader is .err _)
+      let badMethod = Http.Fetch(("NOT A METHOD", url, *()) Bytes.EmptyReader)
+      test.assert("an invalid method is rejected", badMethod is .err _)
+    } in test.done,
+  }

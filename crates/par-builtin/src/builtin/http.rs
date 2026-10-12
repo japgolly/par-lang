@@ -61,7 +61,7 @@ async fn http_fetch(mut handle: Handle) {
 
     let header_pairs = readback_list(request.receive(), |mut handle| async move {
         let name = handle.receive().string().await;
-        let value = handle.string().await;
+        let value = handle.bytes().await;
         (name, value)
     })
     .await;
@@ -87,16 +87,31 @@ async fn http_fetch(mut handle: Handle) {
         }
     };
 
-    let method = reqwest::Method::from_bytes(&method.as_bytes()).unwrap_or(reqwest::Method::GET);
+    let Ok(method) = reqwest::Method::from_bytes(&method.as_bytes()) else {
+        handle.signal(literal!("err"));
+        return handle.provide_string(ParString::from(format!(
+            "invalid HTTP method: {:?}",
+            method.as_str()
+        )));
+    };
 
     let mut headers = reqwest::header::HeaderMap::new();
     for (name, value) in header_pairs.iter() {
-        if let (Ok(hn), Ok(hv)) = (
-            reqwest::header::HeaderName::from_bytes(&name.as_bytes()),
-            reqwest::header::HeaderValue::from_bytes(&value.as_bytes()),
-        ) {
-            headers.append(hn, hv);
-        }
+        let Ok(header_name) = reqwest::header::HeaderName::from_bytes(&name.as_bytes()) else {
+            handle.signal(literal!("err"));
+            return handle.provide_string(ParString::from(format!(
+                "invalid HTTP header name: {:?}",
+                name.as_str()
+            )));
+        };
+        let Ok(header_value) = reqwest::header::HeaderValue::from_bytes(value) else {
+            handle.signal(literal!("err"));
+            return handle.provide_string(ParString::from(format!(
+                "invalid value for HTTP header {:?}",
+                name.as_str()
+            )));
+        };
+        headers.append(header_name, header_value);
     }
 
     let request = client.request(method, url.as_str());
@@ -286,7 +301,7 @@ enum ListenerEvent {
 struct IncomingRequest {
     method: String,
     url: ParsedUrl,
-    headers: Vec<(String, String)>,
+    headers: Vec<(String, Bytes)>,
     body: Incoming,
     respond: IncomingRespond,
 }
@@ -448,11 +463,11 @@ async fn handle_request(
     let headers_vec = parts
         .headers
         .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|v| (name.as_str().to_string(), v.to_string()))
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                Bytes::copy_from_slice(value.as_bytes()),
+            )
         })
         .collect::<Vec<_>>();
 
@@ -562,7 +577,7 @@ async fn provide_http_request_value(
     mut handle: Handle,
     method: String,
     url: ParsedUrl,
-    headers: Vec<(String, String)>,
+    headers: Vec<(String, Bytes)>,
     body: Incoming,
 ) {
     handle.send().provide_string(ParString::from(method));
@@ -571,12 +586,12 @@ async fn provide_http_request_value(
     provide_request_body_reader(handle, body).await;
 }
 
-fn provide_header_list_value(mut handle: Handle, headers: Vec<(String, String)>) {
+fn provide_header_list_value(mut handle: Handle, headers: Vec<(String, Bytes)>) {
     for (name, value) in headers {
         handle.signal(literal!("item"));
         let mut pair = handle.send();
         pair.send().provide_string(ParString::from(name));
-        pair.provide_bytes(Bytes::from(value));
+        pair.provide_bytes(value);
     }
     handle.signal(literal!("end"));
     handle.break_();
@@ -757,12 +772,10 @@ async fn build_response(mut handle: Handle) -> Result<Response<ResponseBody>, Pa
         .map_err(|err| err.to_string())?;
 
     for (name, value) in headers {
-        let Ok(header_name) = HeaderName::from_str(name.as_str()) else {
-            continue;
-        };
-        let Ok(header_value) = HeaderValue::from_bytes(&value) else {
-            continue;
-        };
+        let header_name = HeaderName::from_str(name.as_str())
+            .map_err(|_| format!("invalid HTTP header name: {:?}", name.as_str()))?;
+        let header_value = HeaderValue::from_bytes(&value)
+            .map_err(|_| format!("invalid value for HTTP header {:?}", name.as_str()))?;
         response.headers_mut().append(header_name, header_value);
     }
 
@@ -900,6 +913,43 @@ mod tests {
         client_socket.send(Message::Close(None)).await.unwrap();
         let _ = timeout(Duration::from_secs(1), server_socket.next()).await;
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn incoming_header_values_are_kept_as_raw_bytes() {
+        use tokio::io::AsyncWriteExt;
+
+        let (server_io, mut client_io) = tokio::io::duplex(64 * 1024);
+        let (event_tx, mut event_rx) = mpsc::unbounded();
+        let control = ListenerControl::new(event_tx, "localhost".to_string());
+
+        tokio::spawn(async move {
+            let service = service_fn(move |request: Request<Incoming>| {
+                handle_request(request, control.clone())
+            });
+            let _ = hyper::server::conn::http1::Builder::new()
+                .serve_connection(TokioIo::new(server_io), service)
+                .await;
+        });
+
+        client_io
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Raw: caf\xe9\r\n\r\n")
+            .await
+            .unwrap();
+
+        let incoming = timeout(Duration::from_secs(1), event_rx.next())
+            .await
+            .expect("HTTP listener did not receive the request")
+            .expect("HTTP listener event stream ended");
+        let ListenerEvent::Incoming(incoming) = incoming else {
+            panic!("listener shut down");
+        };
+        let raw = incoming
+            .headers
+            .iter()
+            .find(|(name, _)| name == "x-raw")
+            .map(|(_, value)| value.clone());
+        assert_eq!(raw.as_deref(), Some(&b"caf\xe9"[..]));
     }
 
     #[test]
