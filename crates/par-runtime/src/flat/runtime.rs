@@ -184,12 +184,12 @@ impl Debug for ExternalArc {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// A PackageBody is the inner body of a package.
+/// A PackageBody is the inner body of a package, or of a case branch.
 /// The difference with `Package` is that `PackageBody` does not contain `num_vars`
-/// (because a package inside a PackageBody might not require a new instance)
+/// and captures (because a case branch is instantiated in the instance of its
+/// choice, with its context wired in directly by the compiler).
 pub struct PackageBody<Ext: Clone> {
     pub root: Index<Ext, Global<Ext>>,
-    pub captures: Index<Ext, Global<Ext>>,
 
     pub debug_name: String,
     // TODO: Store this inline in the arena.
@@ -199,7 +199,6 @@ pub struct PackageBody<Ext: Clone> {
 #[derive(Clone, Copy)]
 pub(crate) struct LinkedPackageBody {
     root: GlobalPtr<Linked>,
-    captures: GlobalPtr<Linked>,
     redexes: Index<Linked, [(GlobalPtr<Linked>, GlobalPtr<Linked>)]>,
 }
 
@@ -207,7 +206,6 @@ impl From<&PackageBody<Linked>> for LinkedPackageBody {
     fn from(body: &PackageBody<Linked>) -> Self {
         Self {
             root: body.root,
-            captures: body.captures,
             redexes: body.redexes,
         }
     }
@@ -219,6 +217,8 @@ impl From<&PackageBody<Linked>> for LinkedPackageBody {
 /// separate Instance to be created when it is expanded.
 pub struct Package<Ext: Clone> {
     pub body: PackageBody<Ext>,
+    /// Receives the package's captures when it's instantiated.
+    pub captures: Index<Ext, Global<Ext>>,
     /// How large the Instance must be.
     pub num_vars: usize,
 }
@@ -365,7 +365,8 @@ pub enum GlobalCont<Ext: Clone> {
     /// The par node; created in receive commands (`value[a]`)
     Par(GlobalPtr<Ext>, GlobalPtr<Ext>),
     /// The choice node; created in case commands (`value.case { ... }`)
-    Choice(GlobalPtr<Ext>, Index<Ext, [(Str<Ext>, PackageBody<Ext>)]>),
+    /// The branches are instantiated in the instance of the choice.
+    Choice(Index<Ext, [(Str<Ext>, PackageBody<Ext>)]>),
     /// Instantiate exactly one reusable box and continue with the resulting value.
     Unbox(GlobalPtr<Ext>),
 }
@@ -466,11 +467,12 @@ pub(crate) trait Linker {
     }
 
     // Package-related methods
-    fn instatiate_linked_package_body(
+    /// Links the body's redexes in the instance, and returns its root.
+    fn instantiate_linked_package_body(
         &mut self,
         instance: Instance,
         body: LinkedPackageBody,
-    ) -> (Node<Linked>, Node<Linked>) {
+    ) -> Node<Linked> {
         for redex in body.redexes {
             let (a, b) = *self.arena().get(redex);
             self.link(
@@ -478,10 +480,7 @@ pub(crate) trait Linker {
                 Node::Global(instance.clone(), b),
             );
         }
-        (
-            Node::Global(instance.clone(), body.root),
-            Node::Global(instance, body.captures),
-        )
+        Node::Global(instance, body.root)
     }
     fn instantiate_package_captures(
         &mut self,
@@ -491,17 +490,10 @@ pub(crate) trait Linker {
         let package = self.arena().get(package).get().unwrap();
         let num_vars = package.num_vars;
         let body = LinkedPackageBody::from(&package.body);
+        let captures_in = package.captures;
         let instance = Instance::new(num_vars);
-        self.instantiate_linked_package_body_captures(instance, body, captures)
-    }
-    fn instantiate_linked_package_body_captures(
-        &mut self,
-        instance: Instance,
-        package: LinkedPackageBody,
-        captures: Node<Linked>,
-    ) -> Node<Linked> {
-        let (root, captures_in) = self.instatiate_linked_package_body(instance, package);
-        self.link(captures_in, captures);
+        let root = self.instantiate_linked_package_body(instance.clone(), body);
+        self.link(Node::Global(instance, captures_in), captures);
         root
     }
 
@@ -894,9 +886,9 @@ impl Runtime {
             }
             (
                 Some(Global::Value(Value::Either(signal, payload))),
-                Some(Global::Destruct(GlobalCont::Choice(context, options))),
+                Some(Global::Destruct(GlobalCont::Choice(options))),
             ) => {
-                let (signal, payload, context, options) = (*signal, *payload, *context, *options);
+                let (signal, payload, options) = (*signal, *payload, *options);
                 let (Node::Global(value_instance, _), Node::Global(choice_instance, _)) = (a, b)
                 else {
                     unreachable!()
@@ -905,15 +897,14 @@ impl Runtime {
                     signal,
                     Node::Global(value_instance, payload),
                     choice_instance,
-                    context,
                     options,
                 )));
             }
             (
-                Some(Global::Destruct(GlobalCont::Choice(context, options))),
+                Some(Global::Destruct(GlobalCont::Choice(options))),
                 Some(Global::Value(Value::Either(signal, payload))),
             ) => {
-                let (signal, payload, context, options) = (*signal, *payload, *context, *options);
+                let (signal, payload, options) = (*signal, *payload, *options);
                 let (Node::Global(choice_instance, _), Node::Global(value_instance, _)) = (a, b)
                 else {
                     unreachable!()
@@ -922,14 +913,11 @@ impl Runtime {
                     signal,
                     Node::Global(value_instance, payload),
                     choice_instance,
-                    context,
                     options,
                 )));
             }
-            (Some(Global::Destruct(GlobalCont::Choice(context, options))), None)
-                if is_linear_either(&b) =>
-            {
-                let (context, options) = (*context, *options);
+            (Some(Global::Destruct(GlobalCont::Choice(options))), None) if is_linear_either(&b) => {
+                let options = *options;
                 let (Node::Global(choice_instance, _), Node::Linear(Linear::Value(value))) = (a, b)
                 else {
                     unreachable!()
@@ -941,14 +929,11 @@ impl Runtime {
                     signal,
                     payload,
                     choice_instance,
-                    context,
                     options,
                 )));
             }
-            (None, Some(Global::Destruct(GlobalCont::Choice(context, options))))
-                if is_linear_either(&a) =>
-            {
-                let (context, options) = (*context, *options);
+            (None, Some(Global::Destruct(GlobalCont::Choice(options)))) if is_linear_either(&a) => {
+                let options = *options;
                 let (Node::Linear(Linear::Value(value)), Node::Global(choice_instance, _)) = (a, b)
                 else {
                     unreachable!()
@@ -960,7 +945,6 @@ impl Runtime {
                     signal,
                     payload,
                     choice_instance,
-                    context,
                     options,
                 )));
             }
@@ -1006,24 +990,15 @@ impl Runtime {
         signal: Str<Linked>,
         payload: Node<Linked>,
         instance: Instance,
-        context: GlobalPtr<Linked>,
         options: Index<Linked, [(Str<Linked>, PackageBody<Linked>)]>,
     ) -> Redex {
         self.rewrites.r#match += 1;
         if let Some(package) = self.lookup_case_branch(options, signal) {
-            let root = self.instantiate_linked_package_body_captures(
-                instance.clone(),
-                package,
-                Node::Global(instance, context),
-            );
+            let root = self.instantiate_linked_package_body(instance, package);
             (payload, root)
         } else {
             let branch = self.lookup_case_branch(options, self.arena.empty_string());
-            let root = self.instantiate_linked_package_body_captures(
-                instance.clone(),
-                branch.unwrap(),
-                Node::Global(instance, context),
-            );
+            let root = self.instantiate_linked_package_body(instance, branch.unwrap());
             // TODO: Optimize this; we're reconstructing the `Either` branch.
             // This could make us lose sharing.
             (
@@ -1358,17 +1333,13 @@ impl Runtime {
                 NodeRef::Global(
                     choice_instance,
                     _,
-                    Global::Destruct(GlobalCont::Choice(context, options))
+                    Global::Destruct(GlobalCont::Choice(options))
                 )
             ) => {
                 let package = self
                     .lookup_case_branch(*options, *signal)
                     .expect("Close interacted with a choice without a `.close` branch");
-                let root = self.instantiate_linked_package_body_captures(
-                    choice_instance.clone(),
-                    package,
-                    Node::Global(choice_instance, *context),
-                );
+                let root = self.instantiate_linked_package_body(choice_instance, package);
                 self.link(root, Node::Global(close_instance, close_index));
                 self.rewrites.r#match += 1;
             }
@@ -1516,9 +1487,9 @@ impl Runtime {
                         self.link(a0, Node::Global(instance.clone(), b0));
                         self.link(a1, Node::Global(instance, b1));
                     }
-                    (Value::Either(signal, payload), GlobalCont::Choice(context, options)) => {
-                        let (a, b) = self
-                            .interact_either_choice(signal, payload, instance, context, options);
+                    (Value::Either(signal, payload), GlobalCont::Choice(options)) => {
+                        let (a, b) =
+                            self.interact_either_choice(signal, payload, instance, options);
                         self.link(a, b);
                     }
                     (_, GlobalCont::Unbox(_)) => {
@@ -1667,7 +1638,7 @@ impl<Ext: Clone> GlobalCont<Ext> {
 
             GlobalCont::Par(_a, _b) => "Par".into(),
 
-            GlobalCont::Choice(_ptr, ..) => "Choice".into(),
+            GlobalCont::Choice(..) => "Choice".into(),
 
             GlobalCont::Unbox(_continuation) => "Unbox".into(),
         }

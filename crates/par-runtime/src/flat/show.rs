@@ -146,7 +146,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
                     Par(a, b) => {
                         write!(f, "[{}] {}", Showable(b, self.1), Showable(a, self.1))?;
                     }
-                    Choice(captures, branches) => {
+                    Choice(branches) => {
                         write!(f, ".{{")?;
                         for (k, v) in self.1.arena.get(branches.clone()).iter() {
                             write!(
@@ -156,7 +156,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
                                 Showable(v, self.1)
                             )?;
                         }
-                        write!(f, "}}${}", Showable(captures, self.1))?;
+                        write!(f, "}}")?;
                     }
                 }
             }
@@ -235,7 +235,6 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a PackageBody<
             write!(f, "/* {} */", package.debug_name)?;
         }
         write!(f, "@{}", Showable(&package.root, self.1))?;
-        write!(f, "${}", Showable(&package.captures, self.1))?;
         for (a, b) in self.1.arena.get(package.redexes.clone()) {
             write!(f, "& {} ~ {}", Showable(a, self.1), Showable(b, &self.1))?;
         }

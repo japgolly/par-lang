@@ -108,6 +108,7 @@ fn link_package(
     let lock = OnceLock::new();
     lock.set(Package {
         body: link_package_body(&package.body)?,
+        captures: Index(package.captures.0.clone()),
         num_vars: package.num_vars,
     })
     .unwrap();
@@ -117,7 +118,6 @@ fn link_package(
 fn link_package_body(body: &PackageBody<Unlinked>) -> Result<PackageBody<Linked>, LinkError> {
     Ok(PackageBody {
         root: Index(body.root.0.clone()),
-        captures: Index(body.captures.0.clone()),
         debug_name: body.debug_name.clone(),
         redexes: Index(body.redexes.0.clone()),
     })
@@ -160,7 +160,7 @@ fn link_global_cont(cont: &GlobalCont<Unlinked>) -> Result<GlobalCont<Linked>, L
     Ok(match cont {
         GlobalCont::Continue => GlobalCont::Continue,
         GlobalCont::Par(a, b) => GlobalCont::Par(Index(a.0.clone()), Index(b.0.clone())),
-        GlobalCont::Choice(a, b) => GlobalCont::Choice(Index(a.0.clone()), Index(b.0.clone())),
+        GlobalCont::Choice(branches) => GlobalCont::Choice(Index(branches.0.clone())),
         GlobalCont::Unbox(continuation) => GlobalCont::Unbox(Index(continuation.0.clone())),
     })
 }
