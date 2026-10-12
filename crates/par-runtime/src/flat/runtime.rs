@@ -1139,7 +1139,7 @@ impl Runtime {
         // one of the most complex parts of the V3 runtime.
         //
         //
-        // (1) Expanding packages with FanBehavior::Propagate (definition-like packages)
+        // (1) Expanding packages with FanBehavior::Expand (definition-like packages)
         //
         // Definitions are meant to be just aliases; so they have to behave exactly as if they
         // were inlined. This is why this is has highest priority
@@ -1159,7 +1159,7 @@ impl Runtime {
         // This is higher priority than (4) because share() on packages is what allows duplicating
         // boxes. It is higher priority than (5) to simplify external code.
         //
-        // (4) Expanding packages with FanBehavior::Expand (box-like packages)
+        // (4) Expanding packages with FanBehavior::Propagate (box-like packages)
         //
         // This happens when the box interacts with Request, ExtFns, ExtArcs, and GlobalContinuations (and Values)
         // Since none of these are duplications, the only way to progress is to expand the box (dereliction)

@@ -15,8 +15,9 @@
 //!   active operation still holds a clone or a checked-out connection.
 //!
 //! Every external wait is bounded with a timeout. No data-dependent path
-//! panics: bad SQL, bad input, driver errors, unsupported column types, and
-//! invalid temporal text all become an `Error` (a human-readable string).
+//! panics: bad SQL, bad input, driver errors, and unsupported column types all
+//! become an `Error` (a human-readable string). Temporal values travel as text
+//! and are parsed in `Sql.par`.
 
 use std::sync::Once;
 use std::time::Duration;
