@@ -68,7 +68,13 @@ pub fn item_anchor(kind: ItemKind, primary: &str) -> String {
 pub fn relative_href(from_page: &Path, to_page: &Path) -> String {
     let base_dir = from_page.parent().unwrap_or_else(|| Path::new(""));
     let diff = diff_paths(to_page, base_dir).unwrap_or_else(|| to_page.to_path_buf());
-    let text = diff.to_string_lossy().replace('\\', "/");
+    // File names may themselves be percent-encoded (like `nested%2FModule`), and browsers
+    // decode links before looking files up, so each component is encoded once more.
+    let text = diff
+        .components()
+        .map(|component| encode_segment(&component.as_os_str().to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join("/");
     if text.is_empty() {
         String::from(".")
     } else {
@@ -115,4 +121,19 @@ fn kind_dir(kind: PackageKind) -> &'static str {
 
 fn encode_segment(value: &str) -> String {
     utf8_percent_encode(value, FILE_SEGMENT).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_href;
+    use std::path::Path;
+
+    #[test]
+    fn hrefs_to_percent_encoded_file_names_are_encoded_again() {
+        let href = relative_href(
+            Path::new("packages/root/index.html"),
+            Path::new("packages/root/modules/nested%2FDeep/index.html"),
+        );
+        assert_eq!(href, "modules/nested%252FDeep/index.html");
+    }
 }
