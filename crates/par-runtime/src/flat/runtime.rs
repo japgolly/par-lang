@@ -1334,12 +1334,20 @@ impl Runtime {
             sym!(
                 NodeRef::Global(_, _, Global::Close { .. }),
                 NodeRef::Linear(Linear::Value(value))
-            ) if matches!(value.as_ref(), Value::Break | Value::Primitive(_)) => {
+            ) if matches!(
+                value.as_ref(),
+                Value::Break | Value::Primitive(_) | Value::ExternalArc(_)
+            ) =>
+            {
                 self.rewrites.fanout += 1;
             }
             sym!(
                 NodeRef::Global(_, _, Global::Close { .. }),
-                NodeRef::Global(_, _, Global::Value(Value::Break | Value::Primitive(_)))
+                NodeRef::Global(
+                    _,
+                    _,
+                    Global::Value(Value::Break | Value::Primitive(_) | Value::ExternalArc(_))
+                )
             ) => {
                 self.rewrites.fanout += 1;
             }

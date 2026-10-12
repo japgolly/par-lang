@@ -1,0 +1,21 @@
+module Builtins
+
+import {
+  @core/Bool
+  @core/Bytes
+  @core/Test
+  @core/Url
+}
+
+// Dropping a linear value cleans up the builtin boxes inside it, instead of
+// calling into them.
+def TestDropBuiltinBox: [Test] ! = [test] do {
+  let url = Url.FromString("http://example.com")
+  url.case {
+    .err _ => {}
+    .ok u => {
+      let pair: (Url.Url) Bytes.Reader<either {}> = (u) Bytes.Reader("abc")
+    }
+  }
+  test.assert("dropping a value containing a builtin box doesn't crash", .true!)
+} in test.done
