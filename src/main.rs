@@ -408,7 +408,7 @@ fn main() -> ExitCode {
         )
         .subcommand(
             Command::new("run-vm")
-                .about("Run a definition in a Par package")
+                .about("Run a definition from a compiled `.pvm` file")
                 .arg(arg!(--stats "Print statistics after running the definition"))
                 .arg(
                     arg!(--file <FILE> "Path to .pvm file")
@@ -768,10 +768,22 @@ fn run_definition_vm(
         let definition_target = parsed_target
             .definition_name
             .unwrap_or_else(|| "Main".to_string());
-        let target = format!("{}.{}", parsed_target.module_path, definition_target);
+        let module_target = parsed_target.module_path.trim_matches('/');
+        let target = format!("{module_target}.{definition_target}");
+
+        // Like `run`, match module paths case-insensitively, and definition names exactly.
+        let found = artifact
+            .definition_to_package
+            .iter()
+            .find(|(key, _)| {
+                key.rsplit_once('.').is_some_and(|(module, definition)| {
+                    definition == definition_target && module.eq_ignore_ascii_case(module_target)
+                })
+            })
+            .map(|(_, global)| global);
 
         let start = Instant::now();
-        let package_to_run = match artifact.definition_to_package.get(&target) {
+        let package_to_run = match found {
             Some(ArtifactGlobal::Package(pkg)) => pkg,
             Some(ArtifactGlobal::Unimplemented) => {
                 eprintln!(
