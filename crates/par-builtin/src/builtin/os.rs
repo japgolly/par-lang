@@ -11,7 +11,7 @@ use num_bigint::BigUint;
 use par_runtime::readback::Handle;
 use par_runtime::{external_def, primitive::ParString};
 use tokio::{
-    fs::{self, DirEntry, File, OpenOptions, ReadDir},
+    fs::{self, DirEntry, File, OpenOptions},
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
 
@@ -216,19 +216,21 @@ fn provide_unit_io_result(mut handle: Handle, result: std::io::Result<()>) {
     }
 }
 
-// Provide List<Os.Path> for the directory entries of `base` using a pre-opened ReadDir.
-async fn provide_list_dir(mut handle: Handle, base: &Path, rd: &mut ReadDir) {
-    let mut entries: Vec<(Bytes, std::ffi::OsString)> = Vec::new();
-    while let Ok(Some(entry)) = rd.next_entry().await {
+// The names of the entries of a directory, sorted by their byte representation.
+async fn list_dir_names(dir: &Path) -> std::io::Result<Vec<OsString>> {
+    let mut rd = fs::read_dir(dir).await?;
+    let mut entries: Vec<(Bytes, OsString)> = Vec::new();
+    while let Some(entry) = rd.next_entry().await? {
         let name = entry.file_name();
-        // Sort key: raw bytes if available, fallback to lossy string
-        let key = os_to_bytes(&name);
-        entries.push((key, name));
+        entries.push((os_to_bytes(&name), name));
     }
-    // Sort deterministically by the byte-representation of file name
     entries.sort_by(|(a, _), (b, _)| a.as_ref().cmp(b.as_ref()));
+    Ok(entries.into_iter().map(|(_, name)| name).collect())
+}
 
-    for (_, name) in entries {
+// Provide List<Os.Path> for the given entries of `base`.
+fn provide_list_dir(mut handle: Handle, base: &Path, names: Vec<OsString>) {
+    for name in names {
         let child = base.join(Path::new(&name));
         handle.signal(literal!("item"));
         provide_path(handle.send(), child);
@@ -253,7 +255,7 @@ fn build_dir_tree(dir: PathBuf) -> BoxFuture<'static, Result<Vec<DirNode>, Strin
 
         // Collect entries first to allow deterministic sorting
         let mut items: Vec<(Bytes, DirEntry)> = Vec::new();
-        while let Ok(Some(entry)) = rd.next_entry().await {
+        while let Some(entry) = rd.next_entry().await.map_err(|e| format!("{}", e))? {
             let name = entry.file_name();
             let key = os_to_bytes(&name);
             items.push((key, entry));
@@ -443,10 +445,10 @@ async fn os_move_dir(mut handle: Handle) {
 
 async fn os_list_dir(mut handle: Handle) {
     let path = pathbuf_from_os_path(handle.receive()).await;
-    match fs::read_dir(&path).await {
-        Ok(mut rd) => {
+    match list_dir_names(&path).await {
+        Ok(names) => {
             handle.signal(literal!("ok"));
-            return provide_list_dir(handle, &path, &mut rd).await;
+            return provide_list_dir(handle, &path, names);
         }
         Err(err) => {
             handle.signal(literal!("err"));
