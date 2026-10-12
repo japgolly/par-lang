@@ -332,7 +332,7 @@ fn main() -> ExitCode {
                     arg!([file] "Open a Par file in the playground")
                         .value_parser(value_parser!(PathBuf)),
                 )
-                .arg(arg!(--max_interactions <MAX_INTERACTIONS> ... "Maximum number of interactions during compilation")
+                .arg(arg!(--max_interactions <MAX_INTERACTIONS> "Maximum number of interactions during compilation")
             .value_parser(value_parser!(u32))),
         )
         .subcommand(
@@ -355,8 +355,7 @@ fn main() -> ExitCode {
                         .default_value("."),
                 )
                 .arg(arg!([target] "Target to run: `path/to/Module` or `path/to/Module.Def`"))
-                .arg(arg!(-f --flag <FLAG> ... "Set a flag"))
-                .arg(arg!(--max_interactions <MAX_INTERACTIONS> ... "Maximum number of interactions during compilation")
+                .arg(arg!(--max_interactions <MAX_INTERACTIONS> "Maximum number of interactions during compilation")
             .value_parser(value_parser!(u32))),
         )
         .subcommand(
@@ -366,8 +365,7 @@ fn main() -> ExitCode {
                     arg!(--package <PACKAGE> "Path to package directory (or any file/directory inside it)")
                         .value_parser(value_parser!(PathBuf))
                         .default_value("."),
-                )
-                .arg(arg!(-f --flag <FLAG> ... "Set a flag")),
+                ),
         )
         .subcommand(
             Command::new("doc")
@@ -403,8 +401,7 @@ fn main() -> ExitCode {
                         .value_parser(value_parser!(PathBuf))
                         .default_value("."),
                 )
-                .arg(arg!(-f --flag <FLAG> ... "Set a flag"))
-                .arg(arg!(--max_interactions <MAX_INTERACTIONS> ... "Maximum number of interactions during compilation")
+                .arg(arg!(--max_interactions <MAX_INTERACTIONS> "Maximum number of interactions during compilation")
                     .value_parser(value_parser!(u32))),
         )
         .subcommand(
@@ -416,8 +413,7 @@ fn main() -> ExitCode {
                         .value_parser(value_parser!(PathBuf))
                         .default_value("./compiled.pvm"),
                 )
-                .arg(arg!([target] "Target to run: `path/to/Module` or `path/to/Module.Def`"))
-                .arg(arg!(-f --flag <FLAG> ... "Set a flag")),
+                .arg(arg!([target] "Target to run: `path/to/Module` or `path/to/Module.Def`")),
         )
         .subcommand(
             Command::new("lsp")
@@ -443,8 +439,7 @@ fn main() -> ExitCode {
                 )
                 .arg(arg!([target] "Test target: `path/to/Module` or `path/to/Module.TestName`"))
                 .arg(arg!(--filter <FILTER> "Only run tests matching this filter").required(false))
-                .arg(arg!(-f --flag <FLAG> ... "Set a flag"))
-                .arg(arg!(--max_interactions <MAX_INTERACTIONS> ... "Maximum number of interactions during compilation")
+                .arg(arg!(--max_interactions <MAX_INTERACTIONS> "Maximum number of interactions during compilation")
             .value_parser(value_parser!(u32))),
         )
         .get_matches_from(wild::args());
