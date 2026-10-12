@@ -855,6 +855,25 @@ impl Runtime {
         };
         let (ga, gb) = (global(&a), global(&b));
         match (ga, gb) {
+            // (1) Expanding box-like packages, such as loop bodies.
+            (Some(Global::Package(package, captures, FanBehavior::Expand)), _) => {
+                let (package, captures) = (*package, *captures);
+                let Node::Global(instance, _) = a else {
+                    unreachable!()
+                };
+                self.rewrites.instantiate += 1;
+                let root = self.instantiate_package(package, Captures::Global(instance, captures));
+                return Ok(Some((root, b)));
+            }
+            (_, Some(Global::Package(package, captures, FanBehavior::Expand))) => {
+                let (package, captures) = (*package, *captures);
+                let Node::Global(instance, _) = b else {
+                    unreachable!()
+                };
+                self.rewrites.instantiate += 1;
+                let root = self.instantiate_package(package, Captures::Global(instance, captures));
+                return Ok(Some((root, a)));
+            }
             // (2) Linking variables. Only box-like packages take precedence.
             (Some(Global::Variable(index)), gb) if !is_expand(gb) => {
                 let index = *index;
