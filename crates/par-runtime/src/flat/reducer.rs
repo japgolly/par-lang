@@ -39,7 +39,9 @@ pub struct NetHandle(Arc<NetShared>);
 
 impl NetHandle {
     pub(crate) fn send(&self, msg: ReducerMessage) {
-        self.0.sender.send(msg).unwrap()
+        // If the reducer is gone (for example, its run was cancelled), there's nothing left
+        // to deliver the message to.
+        let _ = self.0.sender.send(msg);
     }
 
     pub(crate) fn arena(&self) -> &Arc<Arena<Linked>> {

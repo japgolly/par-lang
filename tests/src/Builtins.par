@@ -2,9 +2,11 @@ module Builtins
 
 import {
   @core/Bool
+  @core/BoxMap
   @core/Bytes
   @core/Float
   @core/Int
+  @core/Nat
   @core/Number
   @core/String
   @core/Test
@@ -67,4 +69,17 @@ def TestZeroTimesFloat: [Test] ! = [test] do {
   test.assert("zero times NaN is NaN", Float.IsNaN(zero * Float.NaN))
   test.assert("zero times infinity is NaN", Float.IsNaN(Float.Inf * zero))
   test.assert("zero times a number is zero", zero * 5.0 == 0.0)
+} in test.done
+
+// Map versions share their values, so replacing or deleting a value in one version
+// keeps it in the others.
+def TestBoxMapVersionsKeepTheirValues: [Test] ! = [test] do {
+  let m1 = BoxMap.New(type String, type Nat).put("a", 1)
+  let m2 = m1.put("a", 2)
+  let m3 = m2.delete("a")
+  test.assert("the first version keeps its value", m1.get("a") is .some n and n == 1)
+  test.assert("the second version has the new value", m2.get("a") is .some n and n == 2)
+  test.assert("the third version has no value", m3.get("a") is .none!)
+  let m4 = BoxMap.FromList(*(("a") 1, ("a") 2))
+  test.assert("the last repeated key wins", m4.get("a") is .some n and n == 2)
 } in test.done

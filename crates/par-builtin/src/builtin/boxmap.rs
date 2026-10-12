@@ -23,28 +23,44 @@ async fn boxmap_new(handle: Handle) {
 async fn boxmap_from_list(mut handle: Handle) {
     let entries = readback_list(handle.receive(), |mut handle| async move {
         let key = handle.receive_data().await;
-        let value = Arc::new(Mutex::new(handle));
+        let value = Stored::new(handle);
         (key, value)
     })
     .await;
 
-    let mut map: OrdMap<Data, Arc<Mutex<Handle>>> = OrdMap::new();
-    for (k, v) in entries {
-        if let Some(old) = map.insert(k, v) {
-            erase_stored_handle(old);
-        }
-    }
-
+    // Earlier values of repeated keys are erased as they're replaced.
+    let map: OrdMap<Data, Arc<Stored>> = entries.into_iter().collect();
     provide_boxmap(handle, map);
 }
 
-fn erase_stored_handle(handle: Arc<Mutex<Handle>>) {
-    if let Ok(handle) = Arc::try_unwrap(handle) {
-        handle.into_inner().erase();
+/// A value stored in a map. All versions of a map share their stored values, so a value
+/// is erased once the last version holding it is gone.
+struct Stored(Mutex<Option<Handle>>);
+
+impl Stored {
+    fn new(handle: Handle) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(Some(handle))))
+    }
+
+    async fn duplicate(&self) -> Handle {
+        self.0
+            .lock()
+            .await
+            .as_mut()
+            .expect("stored value is only taken on drop")
+            .duplicate()
     }
 }
 
-fn provide_boxmap(handle: Handle, map: OrdMap<Data, Arc<Mutex<Handle>>>) {
+impl Drop for Stored {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.get_mut().take() {
+            handle.erase();
+        }
+    }
+}
+
+fn provide_boxmap(handle: Handle, map: OrdMap<Data, Arc<Stored>>) {
     handle.provide_box(move |mut handle| {
         let mut map = map.clone();
         async move {
@@ -65,7 +81,7 @@ fn provide_boxmap(handle: Handle, map: OrdMap<Data, Arc<Mutex<Handle>>>) {
                         handle.signal(literal!("item"));
                         let mut pair = handle.send();
                         pair.send_data(key);
-                        pair.link(value.lock().await.duplicate());
+                        pair.link(value.duplicate().await);
                     }
                     handle.signal(literal!("end"));
                     return handle.break_();
@@ -75,7 +91,7 @@ fn provide_boxmap(handle: Handle, map: OrdMap<Data, Arc<Mutex<Handle>>>) {
                     match map.get(&key) {
                         Some(value) => {
                             handle.signal(literal!("some"));
-                            return handle.link(value.lock().await.duplicate());
+                            return handle.link(value.duplicate().await);
                         }
                         None => {
                             handle.signal(literal!("none"));
@@ -86,7 +102,7 @@ fn provide_boxmap(handle: Handle, map: OrdMap<Data, Arc<Mutex<Handle>>>) {
                 "put" => {
                     let key = handle.receive_data().await;
                     let value = handle.receive();
-                    map.insert(key, Arc::new(Mutex::new(value)));
+                    map.insert(key, Stored::new(value));
                     return provide_boxmap(handle, map);
                 }
                 "delete" => {
