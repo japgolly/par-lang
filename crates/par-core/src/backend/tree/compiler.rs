@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     fmt::{Debug, Display},
     sync::Arc,
 };
@@ -107,7 +107,6 @@ impl Default for TypedTree {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Var {
     Name(LocalName),
-    Loop(Option<LocalName>),
 }
 
 impl From<LocalName> for Var {
@@ -122,14 +121,18 @@ pub(crate) struct LoopLabel(Option<LocalName>);
 #[derive(Debug)]
 pub(crate) struct Context {
     vars: BTreeMap<Var, TypedTree>,
-    loop_points: BTreeMap<LoopLabel, BTreeSet<LoopLabel>>,
+    // The packages of the loop bodies in scope, instantiated by `loop` with the
+    // current context as their captures.
+    loop_points: BTreeMap<LoopLabel, usize>,
     unguarded_loop_labels: Vec<LoopLabel>,
 }
 
 pub(crate) struct PackData {
     names: Vec<Var>,
     types: Vec<Type<Universal>>,
-    loop_points: BTreeMap<LoopLabel, BTreeSet<LoopLabel>>,
+    // The packages of the loop bodies in scope, instantiated by `loop` with the
+    // current context as their captures.
+    loop_points: BTreeMap<LoopLabel, usize>,
     unguarded_loop_labels: Vec<LoopLabel>,
 }
 
@@ -138,23 +141,14 @@ impl Context {
         &self,
         driver: Option<&LocalName>,
         captures: Option<&Captures>,
-        labels_in_scope: Option<&BTreeSet<LoopLabel>>,
     ) -> PackData {
         let mut m_tys = vec![];
         let mut m_vars = vec![];
         for (name, tree) in self.vars.iter() {
             if let Some(captures) = captures {
-                if let Var::Name(name) = name {
-                    if !captures.names.contains_key(name) && Some(name) != driver {
-                        continue;
-                    }
-                }
-            }
-            if let Some(labels_in_scope) = labels_in_scope {
-                if let Var::Loop(label) = name {
-                    if !labels_in_scope.contains(&LoopLabel(label.clone())) {
-                        continue;
-                    }
+                let Var::Name(name) = name;
+                if !captures.names.contains_key(name) && Some(name) != driver {
+                    continue;
                 }
             }
             m_vars.push(name.clone());
@@ -173,7 +167,6 @@ impl Context {
         &mut self,
         driver: Option<&LocalName>,
         captures: Option<&Captures>,
-        labels_in_scope: Option<&BTreeSet<LoopLabel>>,
         net: &mut Net<Unlinked>,
     ) -> (Tree<Unlinked>, PackData) {
         let mut m_trees = vec![];
@@ -181,19 +174,10 @@ impl Context {
         let mut m_vars = vec![];
         for (name, tree) in core::mem::take(&mut self.vars) {
             if let Some(captures) = captures {
-                if let Var::Name(name) = &name {
-                    if !captures.names.contains_key(name) && Some(name) != driver {
-                        net.link(tree.tree, Tree::Era);
-                        continue;
-                    }
-                }
-            }
-            if let Some(labels_in_scope) = labels_in_scope {
-                if let Var::Loop(label) = &name {
-                    if !labels_in_scope.contains(&LoopLabel(label.clone())) {
-                        net.link(tree.tree, Tree::Era);
-                        continue;
-                    }
+                let Var::Name(name_) = &name;
+                if !captures.names.contains_key(name_) && Some(name_) != driver {
+                    net.link(tree.tree, Tree::Era);
+                    continue;
                 }
             }
             m_vars.push(name);
@@ -257,7 +241,6 @@ pub(crate) struct Compiler {
 #[derive(Clone)]
 struct PollInfo {
     package_id: usize,
-    labels_in_scope: BTreeSet<LoopLabel>,
     driver: LocalName,
 }
 
@@ -510,10 +493,6 @@ impl Compiler {
             let tree = self.use_variable(name, usage, false)?;
             vars.insert(Var::Name(name.clone()), tree);
         }
-        for (label, _) in self.context.loop_points.clone().iter() {
-            let tree = self.use_var(&Var::Loop(label.0.clone()), &VariableUsage::Copy, false)?;
-            vars.insert(Var::Loop(label.0.clone()), tree);
-        }
         let loop_points_before = self.context.loop_points.clone();
         core::mem::swap(&mut vars, &mut self.context.vars);
         let t = f(self);
@@ -632,8 +611,7 @@ impl Compiler {
 
             Expression::Box(span, captures, expression, typ) => {
                 self.with_captures(captures, |this| {
-                    let (context_in, pack_data) =
-                        this.context.pack(None, None, None, &mut this.net);
+                    let (context_in, pack_data) = this.context.pack(None, None, &mut this.net);
                     let (package_id, _) =
                         this.in_package(format!("Box at {span}"), |this, _| {
                             let context_out = this.context.unpack(&pack_data, &mut this.net);
@@ -831,8 +809,6 @@ impl Compiler {
         then: &Arc<Process<Type<Universal>, Universal>>,
         else_: &Arc<Process<Type<Universal>, Universal>>,
     ) -> Result<()> {
-        let labels_in_scope: BTreeSet<_> = self.context.loop_points.keys().cloned().collect();
-
         if matches!(kind, PollKind::Poll) {
             self.bind_variable(
                 driver.clone(),
@@ -862,16 +838,11 @@ impl Compiler {
         let then = then.clone();
         let else_ = else_.clone();
 
-        let pack_template =
-            self.context
-                .pack_template(Some(&driver), Some(&captures), Some(&labels_in_scope));
+        let pack_template = self.context.pack_template(Some(&driver), Some(&captures));
 
-        let (context_in, _pack_data) = self.context.pack(
-            Some(&driver),
-            Some(&captures),
-            Some(&labels_in_scope),
-            &mut self.net,
-        );
+        let (context_in, _pack_data) =
+            self.context
+                .pack(Some(&driver), Some(&captures), &mut self.net);
 
         let (poll_package_id, _) =
             self.in_package(format!("poll body at {span:?}"), |this, package_id| {
@@ -879,7 +850,6 @@ impl Compiler {
                     point.clone(),
                     PollInfo {
                         package_id,
-                        labels_in_scope: labels_in_scope.clone(),
                         driver: driver.clone(),
                     },
                 );
@@ -896,7 +866,7 @@ impl Compiler {
 
                 this.context.unguarded_loop_labels.clear();
                 let (case_context_in, case_pack_data) =
-                    this.context.pack(None, None, None, &mut this.net);
+                    this.context.pack(None, None, &mut this.net);
 
                 let mut branches = HashMap::new();
 
@@ -987,12 +957,9 @@ impl Compiler {
         self.net.link(driver_tree.tree, request);
         self.bind_variable(driver.clone(), next0)?;
 
-        let (context_in, _pack_data) = self.context.pack(
-            Some(driver),
-            Some(captures),
-            Some(&poll_info.labels_in_scope),
-            &mut self.net,
-        );
+        let (context_in, _pack_data) =
+            self.context
+                .pack(Some(driver), Some(captures), &mut self.net);
         self.lazy_redexes.push((
             Tree::Package(poll_package_id, Box::new(context_in), FanBehavior::Expand),
             Tree::Break,
@@ -1143,7 +1110,7 @@ impl Compiler {
     ) -> Result<()> {
         self.context.unguarded_loop_labels.clear();
         let old_tree = self.use_variable(&name, usage, true)?;
-        let (context_in, pack_data) = self.context.pack(None, None, None, &mut self.net);
+        let (context_in, pack_data) = self.context.pack(None, None, &mut self.net);
 
         let mut branches = HashMap::new();
         let mut choice_and_process: Vec<_> = names.iter().zip(processes.iter()).collect();
@@ -1216,43 +1183,24 @@ impl Compiler {
         body: &Arc<Process<Type<Universal>, Universal>>,
     ) -> Result<()> {
         let label = LoopLabel(label.clone());
-
-        let (def0, def1) = self.net.create_wire();
-        let prev = self.context.vars.insert(
-            Var::Loop(label.0.clone()),
-            def0.with_type(Type::Break(Span::default())),
-        );
-
-        if let Some(prev_tree) = prev {
-            self.net.link(prev_tree.tree, Tree::Era);
-        }
-
-        let mut labels_in_scope: BTreeSet<_> = self.context.loop_points.keys().cloned().collect();
-        labels_in_scope.insert(label.clone());
-        self.context
-            .loop_points
-            .insert(label.clone(), labels_in_scope);
         self.context.unguarded_loop_labels.push(label.clone());
 
-        let (context_in, pack_data) =
-            self.context
-                .pack(Some(name), Some(captures), None, &mut self.net);
-        let (id, _) = self.in_package(format!("Loop body at {span}"), |this, _| {
+        // The loop body receives its context as captures, so that each iteration
+        // can move the values straight into the new instance.
+        let (context_in, pack_data) = self.context.pack(Some(name), Some(captures), &mut self.net);
+        let (id, _) = self.in_package(format!("Loop body at {span}"), |this, id| {
             let context_out = this.context.unpack(&pack_data, &mut this.net);
+            this.context.loop_points.insert(label, id);
             this.compile_process(body)?;
             Ok((
-                context_out.with_type(Type::Break(Span::default())),
                 (Tree::Continue).with_type(Type::Continue(Span::default())),
+                context_out.with_type(Type::Break(Span::default())),
             ))
         })?;
-        self.net.link(
-            def1,
-            Tree::Package(id, Box::new(Tree::Break), FanBehavior::Propagate),
-        );
-        self.net.link(
-            context_in,
-            Tree::Package(id, Box::new(Tree::Break), FanBehavior::Propagate),
-        );
+        self.net.redexes.push_back((
+            Tree::Package(id, Box::new(context_in), FanBehavior::Expand),
+            Tree::Break,
+        ));
         Ok(())
     }
 
@@ -1269,17 +1217,17 @@ impl Compiler {
         if self.context.unguarded_loop_labels.contains(&label) {
             return Err(Error::UnguardedLoop(span.clone(), label.clone().0));
         }
-        let tree = self.use_var(&Var::Loop(label.0.clone()), &VariableUsage::Copy, false)?;
+        let package = *self.context.loop_points.get(&label).unwrap();
         let driver_tree = self.use_variable(name, usage, true)?;
         self.bind_variable(driver.clone(), driver_tree)?;
-        let labels_in_scope = self.context.loop_points.get(&label).unwrap().clone();
-        let (context_in, _) = self.context.pack(
-            Some(driver),
-            Some(captures),
-            Some(&labels_in_scope),
-            &mut self.net,
-        );
-        self.net.redexes.push_back((tree.tree, context_in));
+        let (context_in, _) = self
+            .context
+            .pack(Some(driver), Some(captures), &mut self.net);
+        // Lazy, so that the loop isn't unrolled into itself at compile time.
+        self.lazy_redexes.push((
+            Tree::Package(package, Box::new(context_in), FanBehavior::Expand),
+            Tree::Break,
+        ));
         Ok(())
     }
 

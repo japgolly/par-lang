@@ -33,6 +33,7 @@
 //! Hopefully, this runtime will work well enough for a long time.
 
 pub mod arena;
+pub mod lock;
 pub mod readback;
 pub mod reducer;
 pub mod runtime;

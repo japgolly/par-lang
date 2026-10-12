@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::flat::arena::Arena;
+use crate::flat::arena::{Arena, Index};
 use crate::flat::runtime::{
     Global, GlobalPtr, Linear, Node, PackageBody, Shared, SyncShared, Value,
 };
@@ -63,7 +63,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Linear<Ext>,
                 write!(f, "<external variable>")?;
             }
             Linear::ShareHole(mutex) => match mutex.try_lock() {
-                Ok(lock) => match &*lock {
+                Some(lock) => match &*lock {
                     crate::flat::runtime::SharedHole::Filled(_sync_shared) => {
                         write!(f, "<unexpected filled share hole>")?;
                     }
@@ -84,7 +84,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Shared<Ext>,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Shared::Async(mutex) => match mutex.try_lock() {
-                Ok(lock) => match &*lock {
+                Some(lock) => match &*lock {
                     crate::flat::runtime::SharedHole::Filled(sync_shared) => {
                         write!(f, "{}", Showable(sync_shared, self.1))?;
                     }
@@ -146,7 +146,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
                     Par(a, b) => {
                         write!(f, "[{}] {}", Showable(b, self.1), Showable(a, self.1))?;
                     }
-                    Choice(captures, branches) => {
+                    Choice(branches) => {
                         write!(f, ".{{")?;
                         for (k, v) in self.1.arena.get(branches.clone()).iter() {
                             write!(
@@ -156,7 +156,7 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
                                 Showable(v, self.1)
                             )?;
                         }
-                        write!(f, "}}${}", Showable(captures, self.1))?;
+                        write!(f, "}}")?;
                     }
                 }
             }
@@ -165,6 +165,28 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Global<Ext>,
             }
         };
         Ok(())
+    }
+}
+
+impl<'a, 'b, Ext: Clone> std::fmt::Display
+    for Showable<'a, 'b, &'a Index<Ext, [Global<Ext>]>, Ext>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<")?;
+        for global in self.1.arena.get(self.0.clone()) {
+            write!(f, "{} ", Showable(global, self.1))?;
+        }
+        write!(f, ">")
+    }
+}
+
+impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a Box<[Shared<Ext>]>, Ext> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<")?;
+        for shared in self.0.iter() {
+            write!(f, "{} ", Showable(shared, self.1))?;
+        }
+        write!(f, ">")
     }
 }
 
@@ -235,7 +257,6 @@ impl<'a, 'b, Ext: Clone> std::fmt::Display for Showable<'a, 'b, &'a PackageBody<
             write!(f, "/* {} */", package.debug_name)?;
         }
         write!(f, "@{}", Showable(&package.root, self.1))?;
-        write!(f, "${}", Showable(&package.captures, self.1))?;
         for (a, b) in self.1.arena.get(package.redexes.clone()) {
             write!(f, "& {} ~ {}", Showable(a, self.1), Showable(b, &self.1))?;
         }

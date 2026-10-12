@@ -26,11 +26,42 @@ use par_runtime::linker::{
 };
 use par_runtime::pkgid::PackageId;
 
+type GlobalIndex = Index<Unlinked, Global<Unlinked>>;
+
 #[derive(Default)]
 pub(crate) struct NetTranspiler {
     source: tree::net::Net<Unlinked>,
     num_vars: usize,
     variable_map: HashMap<usize, usize>,
+    /// Redexes produced by the transpilation itself, added to the body's redexes.
+    extra_redexes: Vec<(GlobalIndex, GlobalIndex)>,
+}
+
+/// The layout of a package's captures: the `Par` tree of its captures port,
+/// with each leaf becoming one variable slot of the package's instance.
+enum CaptureShape {
+    Empty,
+    Leaf,
+    Pair(Box<CaptureShape>, Box<CaptureShape>),
+}
+
+impl CaptureShape {
+    fn leaves(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::Leaf => 1,
+            Self::Pair(a, b) => a.leaves() + b.leaves(),
+        }
+    }
+
+    fn of(captures: &tree::net::Tree<Unlinked>) -> Self {
+        use tree::net::Tree;
+        match captures {
+            Tree::Par(a, b) => Self::Pair(Box::new(Self::of(a)), Box::new(Self::of(b))),
+            Tree::Continue => Self::Empty,
+            _ => Self::Leaf,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -185,18 +216,18 @@ impl ProgramTranspiler {
     fn current_net_mut(&mut self) -> &mut NetTranspiler {
         self.stack.last_mut().unwrap()
     }
+    /// Transpiles the root and the redexes of the current net, adding `extra_redexes`.
+    /// Its captures port must have been taken out already.
     fn transpile_package_body(&mut self) -> PackageBody<Unlinked> {
         let body = &mut self.current_net_mut().source;
-        assert!(body.ports.len() == 2);
-        let captures = body.ports.pop_back().unwrap();
+        assert!(body.ports.len() == 1);
         let root = body.ports.pop_back().unwrap();
         let mut redexes = Vec::from(body.redexes.clone());
         redexes.append(&mut body.waiting_for_reducer.clone());
         let debug_name = body.debug_name.clone();
 
         let root = self.transpile_tree_and_alloc(root);
-        let captures = self.transpile_tree_and_alloc(captures);
-        let redexes: Vec<_> = redexes
+        let mut redexes: Vec<_> = redexes
             .into_iter()
             .map(|(a, b)| {
                 (
@@ -205,21 +236,34 @@ impl ProgramTranspiler {
                 )
             })
             .collect();
+        redexes.append(&mut self.current_net_mut().extra_redexes);
         let redexes: Index<Unlinked, _> = self.dest.alloc_clone(redexes.as_ref());
         PackageBody {
-            root: root,
-            captures: captures,
+            root,
             debug_name,
             redexes,
         }
+    }
+    fn take_captures_port(&mut self) -> tree::net::Tree<Unlinked> {
+        let body = &mut self.current_net_mut().source;
+        assert!(body.ports.len() == 2);
+        body.ports.pop_back().unwrap()
     }
     fn transpile_package_go(&mut self, body: Net<Unlinked>) -> Package<Unlinked> {
         let mut current_net = NetTranspiler::default();
         current_net.source = body;
         self.stack.push(current_net);
+        // The captures go to the first slots, see `flatten_captures` for the other side.
+        let captures = self.take_captures_port();
+        let num_captures = CaptureShape::of(&captures).leaves();
+        self.current_net_mut().num_vars = num_captures;
+        self.wire_captures(captures, &mut 0);
+        let captures: Vec<_> = (0..num_captures).map(Global::Variable).collect();
+        let captures = self.dest.alloc_clone(captures.as_ref());
         let body = self.transpile_package_body();
         let package = Package {
             body,
+            captures,
             num_vars: self.current_net().num_vars,
         };
         self.stack.pop();
@@ -236,17 +280,136 @@ impl ProgramTranspiler {
         self.dest.get(package_index.clone()).set(package).unwrap();
         package_index
     }
+    /// Case branches are instantiated in the instance of their choice, so instead
+    /// of passing the choice's context into the branch's captures at runtime, the
+    /// branch is made to refer to the context's variables directly.
     fn transpile_casebranch_package(
         &mut self,
         body: Net<Unlinked>,
+        context: &Global<Unlinked>,
     ) -> (PackageBody<Unlinked>, usize) {
         let mut current_net = NetTranspiler::default();
         current_net.source = body;
         current_net.num_vars = self.current_net().num_vars;
         self.stack.push(current_net);
+        let captures = self.take_captures_port();
+        self.wire_context(context, captures);
         let body = self.transpile_package_body();
         let num_vars = self.stack.pop().unwrap().num_vars;
         (body, num_vars)
+    }
+    /// Connects a choice's (already transpiled) context with a branch's captures.
+    /// Where a variable of the context meets a variable of the captures, the
+    /// branch takes over the context's variable. Anything else becomes a redex.
+    fn wire_context(&mut self, context: &Global<Unlinked>, captures: tree::net::Tree<Unlinked>) {
+        use tree::net::Tree;
+        match (context, captures) {
+            (context, Tree::Var(id)) => {
+                match self.current_net_mut().source.variables.remove_linked(id) {
+                    Ok(contents) => self.wire_context(context, contents),
+                    Err(_) => match context {
+                        Global::Variable(slot) => {
+                            let variable_map = &mut self.current_net_mut().variable_map;
+                            match variable_map.entry(id) {
+                                // Both ends of the variable are in the captures.
+                                std::collections::hash_map::Entry::Occupied(other) => {
+                                    let other = other.remove();
+                                    let a = self.dest.alloc(Global::Variable(other));
+                                    let b = self.dest.alloc(Global::Variable(*slot));
+                                    self.current_net_mut().extra_redexes.push((a, b));
+                                }
+                                std::collections::hash_map::Entry::Vacant(vacant) => {
+                                    vacant.insert(*slot);
+                                }
+                            }
+                        }
+                        context => {
+                            let a = self.dest.alloc(context.clone());
+                            let b = Global::Variable(self.current_net_mut().map_variable(id));
+                            let b = self.dest.alloc(b);
+                            self.current_net_mut().extra_redexes.push((a, b));
+                        }
+                    },
+                }
+            }
+            (Global::Value(GlobalValue::Pair(c0, c1)), Tree::Par(b0, b1)) => {
+                let c0 = self.dest.get(*c0).clone();
+                let c1 = self.dest.get(*c1).clone();
+                self.wire_context(&c0, *b0);
+                self.wire_context(&c1, *b1);
+            }
+            (context, captures) => {
+                let a = self.dest.alloc(context.clone());
+                let b = self.transpile_tree_and_alloc(captures);
+                self.current_net_mut().extra_redexes.push((a, b));
+            }
+        }
+    }
+    /// Wires a package's captures port to the first variable slots of its
+    /// instance, one slot per leaf of its `CaptureShape`.
+    fn wire_captures(&mut self, captures: tree::net::Tree<Unlinked>, next_slot: &mut usize) {
+        use tree::net::Tree;
+        match captures {
+            Tree::Par(a, b) => {
+                self.wire_captures(*a, next_slot);
+                self.wire_captures(*b, next_slot);
+            }
+            Tree::Continue => {}
+            leaf => {
+                let slot = *next_slot;
+                *next_slot += 1;
+                self.wire_context(&Global::Variable(slot), leaf);
+            }
+        }
+    }
+    /// Splits the (already transpiled) context of a package into its captures,
+    /// one for each leaf of the package's `CaptureShape`.
+    fn flatten_captures(
+        &mut self,
+        shape: &CaptureShape,
+        context: Global<Unlinked>,
+        captures: &mut Vec<Global<Unlinked>>,
+    ) {
+        match (shape, context) {
+            (CaptureShape::Pair(s0, s1), Global::Value(GlobalValue::Pair(c0, c1))) => {
+                let c0 = self.dest.get(c0).clone();
+                let c1 = self.dest.get(c1).clone();
+                self.flatten_captures(s0, c0, captures);
+                self.flatten_captures(s1, c1, captures);
+            }
+            (CaptureShape::Leaf, context) => captures.push(context),
+            (CaptureShape::Empty, Global::Value(GlobalValue::Break)) => {}
+            (shape, context) => {
+                // The context doesn't have the shape statically, so it's split at runtime.
+                let receiver = self.capture_receiver(shape, captures);
+                let a = self.dest.alloc(context);
+                let b = self.dest.alloc(receiver);
+                self.current_net_mut().extra_redexes.push((a, b));
+            }
+        }
+    }
+    /// Creates a tree receiving a context of the given shape, with each leaf
+    /// going to a fresh variable added to `captures`.
+    fn capture_receiver(
+        &mut self,
+        shape: &CaptureShape,
+        captures: &mut Vec<Global<Unlinked>>,
+    ) -> Global<Unlinked> {
+        match shape {
+            CaptureShape::Pair(s0, s1) => {
+                let a = self.capture_receiver(s0, captures);
+                let b = self.capture_receiver(s1, captures);
+                Global::Destruct(GlobalCont::Par(self.dest.alloc(a), self.dest.alloc(b)))
+            }
+            CaptureShape::Leaf => {
+                let net = self.current_net_mut();
+                let slot = net.num_vars;
+                net.num_vars += 1;
+                captures.push(Global::Variable(slot));
+                Global::Variable(slot)
+            }
+            CaptureShape::Empty => Global::Destruct(GlobalCont::Continue),
+        }
     }
     fn transpile_program(compiled: &IcCompiled) -> Self {
         let mut this = Self::default();
@@ -309,7 +472,8 @@ impl ProgramTranspiler {
                 self.transpile_tree_and_alloc(*tree),
             )),
             Tree::Choice(captures, hash_map, els) => {
-                let mut maximum_casebranch_length = 0;
+                let context = self.transpile_tree(*captures);
+                let mut maximum_casebranch_length = self.current_net().num_vars;
                 let mut table: Vec<_> = hash_map
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
@@ -317,24 +481,24 @@ impl ProgramTranspiler {
                     .map(|(signal, id)| {
                         let signal = self.dest.intern(&signal);
                         let package = self.id_to_package.get(&id).unwrap().clone();
-                        let (package, length) = self.transpile_casebranch_package(package);
+                        let (package, length) =
+                            self.transpile_casebranch_package(package, &context);
                         maximum_casebranch_length = maximum_casebranch_length.max(length);
                         (signal, package)
                     })
                     .collect();
                 self.current_net_mut().num_vars = maximum_casebranch_length;
                 table.sort_by_key(|x| x.0.0);
-                let tree = self.transpile_tree_and_alloc(*captures);
-                Global::Destruct(GlobalCont::Choice(
-                    tree,
-                    self.dest.alloc_clone(table.as_ref()),
-                ))
+                Global::Destruct(GlobalCont::Choice(self.dest.alloc_clone(table.as_ref())))
             }
-            Tree::Package(id, context, behavior) => Global::Package(
-                self.map_package(id),
-                self.transpile_tree_and_alloc(*context),
-                behavior,
-            ),
+            Tree::Package(id, context, behavior) => {
+                let package = self.map_package(id);
+                let shape = CaptureShape::of(&self.id_to_package.get(&id).unwrap().ports[1]);
+                let context = self.transpile_tree(*context);
+                let mut captures = vec![];
+                self.flatten_captures(&shape, context, &mut captures);
+                Global::Package(package, self.dest.alloc_clone(captures.as_ref()), behavior)
+            }
             Tree::SignalRequest(_sender) => todo!(),
             Tree::Primitive(primitive) => Global::Value(GlobalValue::Primitive(primitive)),
             Tree::IntRequest(_sender) => todo!(),

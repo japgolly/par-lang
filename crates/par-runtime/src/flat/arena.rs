@@ -124,12 +124,13 @@ impl<Ext: Clone> std::fmt::Display for Arena<Ext> {
                 write!(f, "@{} = <unfilled>\n", idx)?;
                 continue;
             };
+            let captures = &lock.captures;
             let lock = &lock.body;
             if lock.debug_name.len() > 0 {
                 write!(f, "// {}\n", lock.debug_name)?;
             }
             write!(f, "@{} = {}", idx, Showable(&lock.root, &shower))?;
-            write!(f, "\n    $ {}", Showable(&lock.captures, &shower))?;
+            write!(f, "\n    $ {}", Showable(captures, &shower))?;
             for (a, b) in self.get(lock.redexes.clone()) {
                 write!(
                     f,

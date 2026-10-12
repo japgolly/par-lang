@@ -36,8 +36,7 @@ fn start_and_instantiate_inner(
         measure_net_duration,
     );
     let reducer_future = reducer.spawn_reducer();
-    let handle =
-        crate::flat::readback::Handle::from_package(arena.clone(), net_handle, package).unwrap();
+    let handle = crate::flat::readback::Handle::from_package(net_handle, package).unwrap();
     (
         Handle::from(handle),
         spawner
