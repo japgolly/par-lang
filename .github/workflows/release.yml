@@ -15,26 +15,26 @@ jobs:
         include:
           # --- LINUX ---
           - os: ubuntu-latest # x86_64
-            bin_name: par-lang
+            bin_name: par
             asset_name: par-lang-linux-x86_64
           - os: ubuntu-24.04-arm # ARM64
-            bin_name: par-lang
+            bin_name: par
             asset_name: par-lang-linux-arm64
 
           # --- MACOS ---
           - os: macos-latest # ARM64 (Apple Silicon)
-            bin_name: par-lang
+            bin_name: par
             asset_name: par-lang-macos-arm64
           - os: macos-15-intel # x86_64 (Intel Mac)
-            bin_name: par-lang
+            bin_name: par
             asset_name: par-lang-macos-x86_64
 
           # --- WINDOWS ---
           - os: windows-latest # x86_64
-            bin_name: par-lang.exe
+            bin_name: par.exe
             asset_name: par-lang-windows-x86_64.exe
           - os: windows-11-arm # ARM64
-            bin_name: par-lang.exe
+            bin_name: par.exe
             asset_name: par-lang-windows-arm64.exe
     steps:
       - name: Checkout repository
