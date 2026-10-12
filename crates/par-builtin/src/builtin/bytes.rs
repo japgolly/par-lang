@@ -260,6 +260,10 @@ fn write_chunk(state: &PipeReaderState, bytes: Bytes) -> bool {
     if state.reader_closed() || state.error_present() {
         return false;
     }
+    // Readers never produce empty chunks, so an empty write has nothing to deliver.
+    if bytes.is_empty() {
+        return true;
+    }
     match state.sender.lock().expect("lock failed").as_ref() {
         Some(sender) => sender.unbounded_send(PipeMessage::Chunk(bytes)).is_ok(),
         None => false,

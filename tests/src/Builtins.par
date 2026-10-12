@@ -3,6 +3,7 @@ module Builtins
 import {
   @core/Bool
   @core/Bytes
+  @core/String
   @core/Test
   @core/Url
 }
@@ -18,4 +19,19 @@ def TestDropBuiltinBox: [Test] ! = [test] do {
     }
   }
   test.assert("dropping a value containing a builtin box doesn't crash", .true!)
+} in test.done
+
+// An empty write to a pipe produces no chunk; readers never see empty chunks.
+def TestPipeReaderEmptyWrite: [Test] ! = [test] do {
+  let reader: Bytes.Reader<either {}> = Bytes.PipeReader([w]
+    catch ! => .ok! in
+    do {
+      w.write("").try
+      w.write("ab").try
+      w.write("").try
+      w.close.try
+    } in .ok!
+  )
+  let result = String.ParseReader(reader)->String.Remainder
+  test.assert("empty writes are skipped", result is .ok s and s == "ab")
 } in test.done

@@ -140,7 +140,7 @@ async fn provide_body_reader(mut handle: Handle, response: reqwest::Response) {
                 handle.signal(literal!("ok"));
                 return handle.break_();
             }
-            "read" => match stream.next().await {
+            "read" => match next_non_empty_chunk(&mut stream).await {
                 Some(Ok(bytes)) => {
                     handle.signal(literal!("ok"));
                     handle.signal(literal!("chunk"));
@@ -158,6 +158,18 @@ async fn provide_body_reader(mut handle: Handle, response: reqwest::Response) {
                 }
             },
             _ => unreachable!(),
+        }
+    }
+}
+
+/// Readers never produce empty chunks, so empty chunks of a body stream are skipped.
+async fn next_non_empty_chunk<E>(
+    stream: &mut (impl futures::Stream<Item = Result<Bytes, E>> + Unpin),
+) -> Option<Result<Bytes, E>> {
+    loop {
+        match stream.next().await {
+            Some(Ok(bytes)) if bytes.is_empty() => continue,
+            other => return other,
         }
     }
 }
