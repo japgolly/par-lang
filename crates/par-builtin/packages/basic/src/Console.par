@@ -8,8 +8,10 @@
 export module Console
 
 import {
-  @core/Try
+  @core/Bytes
   @core/String
+  @core/Try
+  Os
 }
 
 export {
@@ -40,4 +42,57 @@ export {
   dec Open : Console
 }
 
-def Open = external
+// The console writes to stdout and reads from stdin, keeping the input read past the
+// current line in `pending`. Stdin is only read on `.prompt`. When writing fails, or
+// reading fails or ends, the console continues with a fresh stdout or stdin.
+def Open = do {
+  let output = Os.Stdout
+  let input = Os.Stdin
+  let pending: Bytes = <<>>
+} in begin case {
+  .close* => !,
+
+  .print(text) => let output = output->Write(`${text}\n`) in loop,
+
+  .prompt(text) => do {
+    let output = output->Write(text)->Flush
+    let (line, pending) input = ReadLine(pending, input)
+  } in (line) loop,
+}
+
+dec Write : [Os.Writer, Bytes] Os.Writer
+def Write = [writer, bytes] writer.write(bytes).case {
+  .ok writer => writer,
+  .err _ => Os.Stdout,
+}
+
+dec Flush : [Os.Writer] Os.Writer
+def Flush = [writer] writer.flush.case {
+  .ok writer => writer,
+  .err _ => Os.Stdout,
+}
+
+// Reads the next line, without its line terminator. At the end of the input, the rest
+// of the input is the last line, unless it's empty.
+dec ReadLine : [Bytes, Os.Reader] (Try<!, String>, Bytes) Os.Reader
+def ReadLine = [pending, reader] do { reader.begin } in if {
+  Bytes.FindAndSplit(pending, .bytes "\n") is .some(line, _, rest)! =>
+    (.ok Line(line), rest) reader,
+  else => reader.read.case {
+    .err _ => EndOfInput(pending),
+    .ok result => result.case {
+      .end! => EndOfInput(pending),
+      .chunk(bytes) reader =>
+        let pending = Bytes.Builder.add(pending).add(bytes).build in reader.loop,
+    },
+  },
+}
+
+dec EndOfInput : [Bytes] (Try<!, String>, Bytes) Os.Reader
+def EndOfInput = [pending] if {
+  Bytes.Length(pending) == 0 => (.err!, <<>>) Os.Stdin,
+  else => (.ok Line(pending), <<>>) Os.Stdin,
+}
+
+dec Line : [Bytes] String
+def Line = [bytes] String.TrimRight(String.FromBytes(bytes), .repeat.str "\r")

@@ -3,7 +3,6 @@ mod boxmap;
 mod byte;
 mod bytes;
 mod char_;
-mod console;
 mod data;
 mod debug;
 mod float;
