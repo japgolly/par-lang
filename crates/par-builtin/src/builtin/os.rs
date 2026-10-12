@@ -1,6 +1,6 @@
 //package: basic
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
 };
 
@@ -39,10 +39,7 @@ external_def! {
 
 async fn path_from_bytes(mut handle: Handle) {
     let b = handle.receive().bytes().await;
-    // Unsafe: we accept arbitrary OS-encoded bytes without validation
-    let os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(b.as_ref()) };
-    let p = PathBuf::from(os);
-    provide_path(handle, p);
+    provide_path(handle, PathBuf::from(bytes_to_os(&b)));
 }
 
 fn provide_path(handle: Handle, path: PathBuf) {
@@ -77,9 +74,7 @@ fn provide_path(handle: Handle, path: PathBuf) {
                 },
                 "append" => {
                     let b = handle.receive().bytes().await;
-                    let os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(b.as_ref()) };
-                    let p2 = path.join(Path::new(os));
-                    provide_path(handle, p2);
+                    provide_path(handle, path.join(bytes_to_os(&b)));
                 }
                 _ => unreachable!(),
             }
@@ -87,19 +82,10 @@ fn provide_path(handle: Handle, path: PathBuf) {
     });
 }
 
+/// Makes a path absolute without touching the file system, so symlinks are not followed:
+/// operations on a path act on the link itself, not on its target.
 fn absolute_path(p: &Path) -> PathBuf {
-    match p.canonicalize() {
-        Ok(abs) => abs,
-        Err(_) => {
-            if p.is_absolute() {
-                p.to_path_buf()
-            } else {
-                std::env::current_dir()
-                    .unwrap_or_else(|_| PathBuf::from("."))
-                    .join(p)
-            }
-        }
-    }
+    std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 fn provide_bytes_parts(mut handle: Handle, p: &Path) {
@@ -126,6 +112,19 @@ fn os_to_bytes(os: &OsStr) -> Bytes {
 #[cfg(not(any(unix, windows)))]
 fn os_to_bytes(os: &OsStr) -> Bytes {
     Bytes::from(os.to_string_lossy().as_ref())
+}
+
+#[cfg(unix)]
+fn bytes_to_os(bytes: &[u8]) -> OsString {
+    use std::os::unix::ffi::OsStrExt;
+    OsStr::from_bytes(bytes).to_os_string()
+}
+
+/// Outside of Unix, OS strings aren't arbitrary bytes, so the bytes are read as UTF-8,
+/// matching `os_to_bytes`.
+#[cfg(not(unix))]
+fn bytes_to_os(bytes: &[u8]) -> OsString {
+    OsString::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
 async fn provide_bytes_reader_from_async(mut handle: Handle, mut reader: impl AsyncRead + Unpin) {
@@ -498,8 +497,7 @@ async fn envmap_new(handle: Handle) {
             }
             "get" => {
                 let name = handle.receive().bytes().await;
-                let name_os: &OsStr = unsafe { OsStr::from_encoded_bytes_unchecked(name.as_ref()) };
-                match std::env::var_os(name_os) {
+                match std::env::var_os(bytes_to_os(&name)) {
                     Some(val) => {
                         let bytes = os_to_bytes(&val);
                         handle.signal(literal!("some"));
@@ -519,6 +517,25 @@ async fn envmap_new(handle: Handle) {
 async fn pathbuf_from_os_path(mut handle: Handle) -> PathBuf {
     handle.signal(literal!("absolute"));
     let path_bytes = handle.bytes().await;
-    let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(&path_bytes) };
-    PathBuf::from(os_str)
+    PathBuf::from(bytes_to_os(&path_bytes))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::absolute_path;
+
+    #[test]
+    fn absolute_paths_do_not_follow_symlinks() {
+        let dir = std::env::temp_dir().join(format!("par-os-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("target");
+        let link = dir.join("link");
+        std::fs::write(&target, b"data").unwrap();
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let resolved = absolute_path(&link);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(resolved, link);
+    }
 }
