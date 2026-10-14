@@ -246,7 +246,7 @@ def Route = [method, path] if {
 dec IsFileName : [String] Bool
 def IsFileName = [name] if {
   name == "" or name == "." or name == ".." => .false!,
-  name->String.Contains(.or *(.str "/", .str "\\")) => .false!,
+  name->String.Contains(.anyOf *(.str "/", .str "\\")) => .false!,
   else => .true!,
 }
 

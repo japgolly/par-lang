@@ -11,5 +11,5 @@ def TestCharClasses : [Test] ! = [test] do {
     .check("A range includes its upper bound", Char.Is("f", .range("a", "f")!))
     .check("A range excludes characters past it", not Char.Is("g", .range("a", "f")!))
     .check("ASCII lower rejects uppercase", not Char.Is("Q", .ascii.lower!))
-    .check("Patterns use ranges", String.Matches("c0ffee", .repeat1.or *(.one.range("a", "f")!, .one.ascii.digit!)))
+    .check("Patterns use ranges", String.Matches("c0ffee", .repeat1.anyOf *(.one.range("a", "f")!, .one.ascii.digit!)))
 } in !

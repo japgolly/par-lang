@@ -171,19 +171,13 @@ where
 }
 
 fn lowercase_identifier(input: &mut Input) -> Result<(Span, String)> {
-    alt((
-        literal(TokenKind::LowercaseIdentifier),
-        literal(TokenKind::And),
-        literal(TokenKind::Neg),
-        literal(TokenKind::Not),
-        literal(TokenKind::Or),
-    ))
-    .context(StrContext::Expected(StrContextValue::CharLiteral('_')))
-    .context(StrContext::Expected(StrContextValue::Description(
-        "lower-case alphabetic",
-    )))
-    .map(|token: &[Token]| (token[0].span(), token[0].raw.to_owned()))
-    .parse_next(input)
+    literal(TokenKind::LowercaseIdentifier)
+        .context(StrContext::Expected(StrContextValue::CharLiteral('_')))
+        .context(StrContext::Expected(StrContextValue::Description(
+            "lower-case alphabetic",
+        )))
+        .map(|token: &[Token]| (token[0].span(), token[0].raw.to_owned()))
+        .parse_next(input)
 }
 
 fn uppercase_identifier(input: &mut Input) -> Result<(Span, String)> {
@@ -4164,43 +4158,6 @@ def Value = `\` \${ \#{ \n`
                 ));
             }
             other => panic!("unexpected AST: {other:#?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_operator_keywords_as_identifiers() {
-        let source = "\
-module Main
-
-def UseNot = let not = 1 in not
-def UseNeg = let neg = 2 in neg
-def UseAnd = let and = 3 in and
-def UseOr = let or = 4 in or
-";
-        let parsed = parse_source_file(source, "Main.par".into()).unwrap();
-        for (definition, expected) in parsed
-            .body
-            .definitions
-            .iter()
-            .zip(["not", "neg", "and", "or"])
-        {
-            assert!(matches!(
-                &definition.body,
-                DefinitionBody::Par(Expression::Let {
-                    pattern: Pattern {
-                        steps,
-                        terminal: PatternTerminal::Name(_, LocalName { string, .. }, _),
-                    },
-                    then,
-                    ..
-                }) if steps.is_empty()
-                    && string.as_str() == expected
-                    && matches!(
-                        **then,
-                        Expression::Variable(_, LocalName { ref string, .. })
-                            if string.as_str() == expected
-                    )
-            ));
         }
     }
 

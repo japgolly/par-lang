@@ -86,8 +86,8 @@ export {
   // - `.repeat p` — matches zero or more repetitions of pattern `p`.
   // - `.repeat1 p` — matches one or more repetitions of pattern `p`.
   // - `.concat ps` — matches a sequence of patterns in order.
-  // - `.and ps` — matches only if all patterns match the same input.
-  // - `.or ps` — matches if any of the patterns match.
+  // - `.allOf ps` — matches only if all patterns match the same input.
+  // - `.anyOf ps` — matches if any of the patterns match.
   //
   // Common idiom: `.repeat.one.any!` matches any number of any characters.
   type Pattern = recursive either {
@@ -100,8 +100,8 @@ export {
     .repeat self,
     .repeat1 self,
     .concat List<self>,
-    .and List<self>,
-    .or List<self>,
+    .allOf List<self>,
+    .anyOf List<self>,
   }
 
   // Wraps a string in quotes with escape sequences (e.g. `\n`, `\t`, `\\`).
@@ -260,7 +260,7 @@ def Close = [<e> parser] parser.case {
   .ready parser => parser.close,
 }
 
-def Lines = [<e: drop> parser] parser->SplitByPattern(.or *(.str "\r\n", .str "\n"))
+def Lines = [<e: drop> parser] parser->SplitByPattern(.anyOf *(.str "\r\n", .str "\n"))
 
 def SplitBy = [<e: drop> parser, separator] parser->SplitByPattern(.str separator)
 
@@ -438,6 +438,6 @@ def ContainsEmpty = [pattern] pattern.begin.case {
   .repeat _ => .true!,
   .repeat1 p => p.loop,
   .concat ps => ps->List.All(box [p] p.loop),
-  .and ps => ps->List.All(box [p] p.loop),
-  .or ps => ps->List.Any(box [p] p.loop),
+  .allOf ps => ps->List.All(box [p] p.loop),
+  .anyOf ps => ps->List.Any(box [p] p.loop),
 }
