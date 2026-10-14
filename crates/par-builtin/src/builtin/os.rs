@@ -18,6 +18,9 @@ use tokio::{
 external_def! {
     @basic/Os.{
         Path => path_from_bytes,
+        Exists => os_exists,
+        IsFile => os_is_file,
+        IsDir => os_is_dir,
         Stdin => os_stdin,
         Stdout => os_stdout,
         Stderr => os_stderr,
@@ -29,6 +32,8 @@ external_def! {
         CreateDir => os_create_dir,
         RemoveFile => os_remove_file,
         RemoveDir => os_remove_dir,
+        RemoveDirAll => os_remove_dir_all,
+        CopyFile => os_copy_file,
         MoveFile => os_move_file,
         MoveDir => os_move_dir,
         ListDir => os_list_dir,
@@ -214,6 +219,15 @@ fn provide_unit_io_result(mut handle: Handle, result: std::io::Result<()>) {
             handle.provide_string(ParString::from(err.to_string()));
         }
     }
+}
+
+fn provide_bool(mut handle: Handle, value: bool) {
+    handle.signal(if value {
+        literal!("true")
+    } else {
+        literal!("false")
+    });
+    handle.break_();
 }
 
 // The names of the entries of a directory, sorted by their byte representation.
@@ -441,6 +455,34 @@ async fn os_move_dir(mut handle: Handle) {
     let src = pathbuf_from_os_path(handle.receive()).await;
     let dst = pathbuf_from_os_path(handle.receive()).await;
     provide_unit_io_result(handle, fs::rename(&src, &dst).await);
+}
+
+async fn os_remove_dir_all(mut handle: Handle) {
+    let path = pathbuf_from_os_path(handle.receive()).await;
+    provide_unit_io_result(handle, fs::remove_dir_all(&path).await);
+}
+
+async fn os_copy_file(mut handle: Handle) {
+    let src = pathbuf_from_os_path(handle.receive()).await;
+    let dst = pathbuf_from_os_path(handle.receive()).await;
+    provide_unit_io_result(handle, fs::copy(&src, &dst).await.map(|_| ()));
+}
+
+async fn os_exists(mut handle: Handle) {
+    let path = pathbuf_from_os_path(handle.receive()).await;
+    provide_bool(handle, fs::try_exists(&path).await.unwrap_or(false));
+}
+
+async fn os_is_file(mut handle: Handle) {
+    let path = pathbuf_from_os_path(handle.receive()).await;
+    let metadata = fs::metadata(&path).await;
+    provide_bool(handle, metadata.is_ok_and(|m| m.is_file()));
+}
+
+async fn os_is_dir(mut handle: Handle) {
+    let path = pathbuf_from_os_path(handle.receive()).await;
+    let metadata = fs::metadata(&path).await;
+    provide_bool(handle, metadata.is_ok_and(|m| m.is_dir()));
 }
 
 async fn os_list_dir(mut handle: Handle) {
