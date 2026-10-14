@@ -35,11 +35,5 @@ def SomeValidAndInvalidActions : List<String> = *(
   `{"action": "decrement", "delta": 10}`,
 )
 
-def ParsedActions : List<Try<!, Action>> =
-  SomeValidAndInvalidActions
-    ->List.Map(box Json.Decode)
-    ->List.Map(box [result] {
-      result
-        ->Try.MapErr(box [_] !)
-        ->Try.FlatMap(box ActionFormat.parse)
-    })
+def ParsedActions : List<Try<Json.Error, Action>> =
+  SomeValidAndInvalidActions->List.Map(box [text] Json.Parse(text, ActionFormat))

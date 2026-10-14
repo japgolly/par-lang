@@ -13,6 +13,9 @@ import {
 
 export {
   // Human-readable JSON parse/decode errors.
+  //
+  // Errors from formats start with the path to the offending value, e.g.
+  // `.users[3].name: expected a string, found a number`.
   type Error = CoreString
 
   // A materialized JSON value.
@@ -35,9 +38,9 @@ export {
   // A reusable parser from a materialized `Json` value into a typed value.
   //
   // A `Format<a>` exposes a single `.parse` operation that returns `.ok value`
-  // on success or `.err!` on mismatch.
+  // on success, or `.err error` saying where and why the value didn't match.
   type Format<a> = box choice {
-    .parse(Json) => Try<!, a>
+    .parse(Json) => Try<Error, a>
   }
 
   // A reusable parser specialized to JSON objects.
@@ -45,7 +48,7 @@ export {
   // Use `Json.Object(...)` to lift an `ObjectFormat<a>` into a full
   // `Format<a>`.
   type ObjectFormat<a> = box choice {
-    .parseObject(BoxMap.Readonly<CoreString, Json>) => Try<!, a>,
+    .parseObject(BoxMap.Readonly<CoreString, Json>) => Try<Error, a>,
   }
 
   // Encodes a `Json` value into compact JSON text.
@@ -53,6 +56,14 @@ export {
 
   // Decodes JSON text into a materialized `Json` value.
   dec Decode : [CoreString] Try<Error, Json>
+
+  // Decodes JSON text and parses it with a format in one step.
+  //
+  // ```par
+  // Json.Parse(`{"name": "Par"}`, Json.Object(Json.Field("name", Json.String)))
+  // // = .ok "Par"
+  // ```
+  dec Parse : [CoreString, <a> Format<a>] Try<Error, a>
 
   // Tests two `Json` values for structural equality.
   //
@@ -69,8 +80,8 @@ export {
   // Applies a fallible post-processing step to a successful parse result.
   //
   // The mapping function returns `.ok value` to accept the parsed result or
-  // `.err!` to reject it.
-  dec Then : [<a> Format<a>, <b> box [a] Try<!, b>] Format<b>
+  // `.err error` to reject it with a message.
+  dec Then : [<a> Format<a>, <b> box [a] Try<Error, b>] Format<b>
 
   // Matches exactly one JSON value.
   dec Literal : [Json] Format<!>
@@ -167,6 +178,8 @@ def Encode = external
 
 def Decode = external
 
+def Parse = [text, <a> format] Decode(text)->Try.FlatMap(box format.parse)
+
 def Equals = [json1, json2] json1.begin.case {
   .null! => json2 is .null!,
   .bool b1 => json2 is .bool b2 and {b1 and b2 or not b1 and not b2},
@@ -193,73 +206,93 @@ def ListEquals = [<a: drop> list1, <b: drop> list2, eq] list1.begin.case {
   },
 }
 
+dec Describe : [Json] CoreString
+def Describe = [json] json.case {
+  .null! => "null",
+  .bool _ => "a boolean",
+  .string _ => "a string",
+  .number _ => "a number",
+  .list _ => "an array",
+  .object _ => "an object",
+}
+
+dec Expected : [CoreString, Json] Error
+def Expected = [what, json] `expected ${what}, found ${Describe(json)}`
+
+dec At : [CoreString, Error] Error
+def At = [segment, error] if {
+  error->CoreString.StartsWith(.anyOf *(.str ".", .str "[")) => `${segment}${error}`,
+  else => `${segment}: ${error}`,
+}
+
 def Map = [<a> format, <b> f] box case {
-  .parse(json) => format.parse(json).case {
-    .ok value => .ok f(value),
-    .err! => .err!,
-  }
+  .parse(json) => format.parse(json)->Try.Map(f)
 }
 
 def Then = [<a> format, <b> f] box case {
-  .parse(json) => format.parse(json).case {
-    .ok value => f(value),
-    .err! => .err!,
-  }
+  .parse(json) => format.parse(json)->Try.FlatMap(f)
 }
 
 def Literal = [json1] box case {
   .parse(json2) => if {
     json1->Equals(json2) => .ok!,
-    else => .err!,
+    else => .err Expected(Encode(json1), json2),
   }
 }
 
 def Null = box case {
   .parse(json) => json.case {
     .null! => .ok!,
-    else _ => .err!,
+    else json => .err Expected("null", json),
   }
 }
 
 def Bool = box case {
   .parse(json) => json.case {
     .bool b => .ok b,
-    else _ => .err!,
+    else json => .err Expected("a boolean", json),
   }
 }
 
 def String = box case {
   .parse(json) => json.case {
     .string s => .ok s,
-    else _ => .err!,
+    else json => .err Expected("a string", json),
   }
 }
 
 def Number = box case {
   .parse(json) => json.case {
     .number n => .ok n,
-    else _ => .err!,
+    else json => .err Expected("a number", json),
   }
 }
 
 def List = [<a: drop> item] box case {
   .parse(json) => json.case {
-    .list xs => xs.begin.case {
-      .end! => .ok .end!,
-      .item(x) xs => if {
-        not item.parse(x) is .ok x1 => .err!,
-        not xs.loop is .ok xs1 => .err!,
-        else => .ok .item(x1) xs1,
-      }
-    }
-    else _ => .err!,
+    .list xs =>
+      let index = 0
+      in xs.begin.case {
+        .end! => .ok .end!,
+        .item(x) xs => do {
+          let here = index
+          index += 1
+        } in item.parse(x).case {
+          .err e => .err At(`[#{here}]`, e),
+          .ok x1 => {xs.loop}.case {
+            .err e => .err e,
+            .ok xs1 => .ok .item(x1) xs1,
+          },
+        },
+      },
+    else json => .err Expected("an array", json),
   }
 }
 
 def Object = [<a> format] box case {
   .parse(json) => json.case {
     .object o => format.parseObject(o),
-    else _ => .err!,
+    else json => .err Expected("an object", json),
   }
 }
 
@@ -268,10 +301,9 @@ def Empty = box case {
 }
 
 def Field = [key, <a> format] box case {
-  .parseObject(object) => if {
-    not object.get(key) is .some json => .err!,
-    not format.parse(json) is .ok value => .err!,
-    else => .ok value,
+  .parseObject(object) => object.get(key).case {
+    .none! => .err At(`.${key}`, "missing"),
+    .some json => format.parse(json)->Try.MapErr(box [e] At(`.${key}`, e)),
   }
 }
 
@@ -279,43 +311,45 @@ def OptionalField = [key, <a> format] box case {
   .parseObject(object) => object.get(key).case {
     .some json => format.parse(json).case {
       .ok value => .ok .some value,
-      .err! => .err!,
+      .err e => .err At(`.${key}`, e),
     },
     .none! => .ok .none!,
   }
 }
 
 def And = [<a: drop> format1, <b: drop> format2] box case {
-  .parseObject(object) => if {
-    not format2.parseObject(object) is .ok y => .err!,
-    not format1.parseObject(object) is .ok x => .err!,
-    else => .ok (y) x,
-  }
+  .parseObject(object) => catch e => .err e in do {
+    let try x = format1.parseObject(object)
+    let try y = format2.parseObject(object)
+  } in .ok (y) x
 }
 
 def Union = [<a> variants] box case {
   .parse(json) => variants.begin.case {
     .item((<b> format) map) rest => format.parse(json).case {
       .ok value => .ok map(value),
-      .err! => rest.loop,
+      .err _ => rest.loop,
     }
-    .end! => .err!,
+    .end! => .err "matched none of the alternatives",
   }
 }
 
 def Tagged = [tagKey, <a> variants] box case {
-  .parse(json) => if {
-    json is .object o and o.get(tagKey) is .some actualTag => variants.begin.case {
-      .item((tag, <b> format) map) rest => if {
-        tag->Equals(actualTag) => format.parseObject(o).case {
-          .ok value => .ok map(value),
-          .err! => .err!,
+  .parse(json) => json.case {
+    .object o => o.get(tagKey).case {
+      .none! => .err At(`.${tagKey}`, "missing"),
+      .some actualTag => variants.begin.case {
+        .item((tag, <b> format) map) rest => if {
+          tag->Equals(actualTag) => format.parseObject(o).case {
+            .ok value => .ok map(value),
+            .err e => .err e,
+          },
+          else => rest.loop,
         }
-        else => rest.loop,
-      }
-      .end! => .err!,
-    }
-    else => .err!,
+        .end! => .err At(`.${tagKey}`, `unknown tag ${Encode(actualTag)}`),
+      },
+    },
+    else json => .err Expected("an object", json),
   }
 }
 
@@ -324,7 +358,7 @@ def OrNull = [<a> format] box case {
     .null! => .ok .none!,
     else json => format.parse(json).case {
       .ok value => .ok .some value,
-      .err! => .err!,
+      .err e => .err e,
     },
   }
 }

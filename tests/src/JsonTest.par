@@ -1,0 +1,21 @@
+module JsonTest
+
+import {
+  @core/Json
+  @core/List
+  @core/Test
+}
+
+def Users = Json.Object(Json.Field("users", Json.List(Json.Object(Json.Field("name", Json.String)))))
+
+def Kind = Json.Tagged("kind", *((.string "a", Json.Empty) box [!] !))
+
+def TestJsonErrorPaths : [Test] ! = [test] do {
+  test
+    .check("A nested mismatch reports its full path",
+      Json.Parse(`{"users": [{"name": "a"}, {"name": 1}]}`, Users) == .err ".users[1].name: expected a string, found a number")
+    .check("A missing field is reported at its path",
+      Json.Parse(`{"users": [{}]}`, Users) == .err ".users[0].name: missing")
+    .check("An unknown tag is reported at the tag field",
+      Json.Parse(`{"kind": "b"}`, Kind) == .err `.kind: unknown tag "b"`)
+} in !
