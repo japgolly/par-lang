@@ -5,7 +5,7 @@
 ```par
 type String.Builder = iterative choice {
   .add(String) => self,
-  .build => String,
+  .build* => String,
 }
 ```
 
@@ -55,7 +55,7 @@ def LetsBuildStrings = do {
 ```par
 builder: [String] iterative choice {
   .add(String) => self,
-  .build => String,
+  .build* => String,
 }
 ```
 

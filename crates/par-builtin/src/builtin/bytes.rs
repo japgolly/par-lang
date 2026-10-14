@@ -52,7 +52,7 @@ async fn bytes_builder(mut handle: Handle) {
             "add" => {
                 buf.extend(handle.receive().bytes().await.as_ref());
             }
-            "build" => {
+            "build" | "#close" => {
                 handle.provide_bytes(Bytes::from(buf));
                 break;
             }

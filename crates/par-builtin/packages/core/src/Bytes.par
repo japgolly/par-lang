@@ -14,7 +14,7 @@ export {
   // An incremental byte buffer builder. Add chunks with `.add`, then finalize with `.build`.
   type Builder = iterative choice {
     .add(Bytes) => self,
-    .build => Bytes,
+    .build* => Bytes,
   }
 
   // A streaming byte reader, parameterized by an error type `e`.

@@ -2,8 +2,10 @@ module CleanupBranch
 
 import {
   @core/Bool
+  @core/Bytes
   @core/Map
   @core/Nat
+  @core/String
   @core/Test
 }
 
@@ -84,3 +86,9 @@ def TestExternalCleanupAlias: [Test] ! = [test] do {
     .some previous => { map.put(resource) },
   }
 } in !
+
+def TestDroppingUnfinishedBuilders: [Test] ! = [test] do {
+  let strings = String.Builder.add("unfinished")
+  let bytes = Bytes.Builder.add("unfinished")
+  test.assert("Unfinished String and Bytes builders are dropped via `.build*`", .true!)
+} in test.done

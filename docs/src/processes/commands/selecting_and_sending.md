@@ -5,7 +5,7 @@ The built-in `String.Builder` type is defined this way:
 ```par
 type String.Builder = iterative choice {
   .add(String) => self,
-  .build => String,
+  .build* => String,
 }
 ```
 
@@ -62,7 +62,7 @@ Therefore, the type of `builder` after this `builder.add` command becomes a func
 ```par
 builder: [String] iterative choice {
   .add(String) => self,
-  .build => String,
+  .build* => String,
 }
 ```
 

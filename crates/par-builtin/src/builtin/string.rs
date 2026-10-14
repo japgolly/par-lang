@@ -44,7 +44,7 @@ async fn string_builder(mut handle: Handle) {
             "add" => {
                 buf += handle.receive().string().await.as_str();
             }
-            "build" => {
+            "build" | "#close" => {
                 handle.provide_string(ParString::from(buf));
                 break;
             }

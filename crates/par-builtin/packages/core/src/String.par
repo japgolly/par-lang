@@ -20,7 +20,7 @@ export {
   // ```
   type Builder = iterative choice {
     .add(String) => self,
-    .build => String,
+    .build* => String,
   }
 
   // A streaming string parser, parameterized by an error type `e`.
