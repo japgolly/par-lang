@@ -5,7 +5,9 @@ import {
   Bool as CoreBool
   BoxMap
   Float
+  Int as CoreInt
   List as CoreList
+  Nat as CoreNat
   Option
   Try
   String as CoreString
@@ -83,6 +85,9 @@ export {
   // `.err error` to reject it with a message.
   dec Then : [<a> Format<a>, <b> box [a] Try<Error, b>] Format<b>
 
+  // Accepts any JSON value, returning it as is.
+  dec Any : Format<Json>
+
   // Matches exactly one JSON value.
   dec Literal : [Json] Format<!>
   
@@ -98,6 +103,12 @@ export {
   // Parses a JSON number.
   dec Number : Format<Float>
 
+  // Parses a JSON number that is an integer. Numbers with a fractional part are rejected.
+  dec Int : Format<CoreInt>
+
+  // Parses a JSON number that is a non-negative integer.
+  dec Nat : Format<CoreNat>
+
   // Parses a JSON array with the given item format.
   //
   // The item type must be safely discardable because earlier parsed items may
@@ -106,6 +117,9 @@ export {
 
   // Parses a JSON object with the given object format.
   dec Object : [<a> ObjectFormat<a>] Format<a>
+
+  // Parses a JSON object with arbitrary keys, parsing every value with the given format.
+  dec Dict : [<a: share> Format<a>] Format<BoxMap<CoreString, a>>
 
   // Parses an empty object. Ignores any fields, does not fail if fields are present.
   dec Empty : ObjectFormat<!>
@@ -233,6 +247,10 @@ def Then = [<a> format, <b> f] box case {
   .parse(json) => format.parse(json)->Try.FlatMap(f)
 }
 
+def Any = box case {
+  .parse(json) => .ok json,
+}
+
 def Literal = [json1] box case {
   .parse(json2) => if {
     json1->Equals(json2) => .ok!,
@@ -268,6 +286,23 @@ def Number = box case {
   }
 }
 
+def Int = box case {
+  .parse(json) => json.case {
+    .number n =>
+      let i = Float.ToInt(n)
+      in if {
+        Float.IsFinite(n) and Float.FromInt(i) == n => .ok i,
+        else => .err `expected an integer, found #{n}`,
+      },
+    else json => .err Expected("an integer", json),
+  }
+}
+
+def Nat = Int->Then(box [i] if {
+  i >= 0 => .ok CoreNat.Max(0, i),
+  else => .err `expected a non-negative integer, found #{i}`,
+})
+
 def List = [<a: drop> item] box case {
   .parse(json) => json.case {
     .list xs =>
@@ -295,6 +330,23 @@ def Object = [<a> format] box case {
     else json => .err Expected("an object", json),
   }
 }
+
+def Dict = [<a: share> value] box case {
+  .parse(json) => json.case {
+    .object o =>
+      let dict = BoxMap.New(type CoreString, type a)
+      in o.list.begin.case {
+        .end! => .ok dict,
+        .item((key) x) entries => value.parse(x).case {
+          .err e => .err At(`.${key}`, e),
+          .ok x => do {
+            dict.put(key, x)
+          } in entries.loop,
+        },
+      },
+    else json => .err Expected("an object", json),
+  }
+}        
 
 def Empty = box case {
   .parseObject(_) => .ok!,

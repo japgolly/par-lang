@@ -19,3 +19,15 @@ def TestJsonErrorPaths : [Test] ! = [test] do {
     .check("An unknown tag is reported at the tag field",
       Json.Parse(`{"kind": "b"}`, Kind) == .err `.kind: unknown tag "b"`)
 } in !
+
+def TestJsonNumberAndDictFormats : [Test] ! = [test] do {
+  test
+    .check("Int rejects fractions",
+      Json.Parse("[1, 2.5]", Json.List(Json.Int)) == .err "[1]: expected an integer, found 2.5")
+    .check("Nat rejects negative integers",
+      Json.Parse("-3", Json.Nat) == .err "expected a non-negative integer, found -3")
+    .check("Dict parses every value",
+      Json.Parse(`{"b": 2, "a": 1}`, Json.Dict(Json.Nat)) is .ok dict and dict.list == *(("a") 1, ("b") 2))
+    .check("Dict reports the key of a bad value",
+      Json.Parse(`{"a": "x"}`, Json.Dict(Json.Nat)) is .err e and e == ".a: expected an integer, found a string")
+} in !
