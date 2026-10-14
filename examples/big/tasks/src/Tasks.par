@@ -92,10 +92,7 @@ def Query = [db, sql, params] catch e => .err e in do {
 } in DecodeAll(rows)
 
 dec First : [Try<Sql.Error, List<Task>>] Try<Sql.Error, Option<Task>>
-def First = [result] Try.Map(result, box [tasks] tasks.case {
-  .end! => .none!,
-  .item(task) _ => .some task,
-})
+def First = [result] result->Try.Map(box [tasks] tasks->List.First)
 
 dec DecodeAll : [List<Sql.Row>] Try<Sql.Error, List<Task>>
 def DecodeAll = [rows] rows.begin.case {
