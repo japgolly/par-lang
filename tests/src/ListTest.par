@@ -1,0 +1,23 @@
+module ListTest
+
+import {
+  @core/List
+  @core/String
+  @core/Test
+}
+
+def TestListAdditions : [Test] ! = [test] do {
+  let (big) small = *(1, 4, 2, 3)->List.Partition(box [n] n > 2)
+  let (bigLinear) smallLinear = *(1, 4, 2, 3)->List.PartitionLinear(box [n] (n > 2) n)
+  let words = *("bb", "a", "cc", "d")
+
+  test
+    .check("Partition keeps the order of matches", big == *(4, 3))
+    .check("Partition keeps the order of the rest", small == *(1, 2))
+    .check("PartitionLinear splits the same way", bigLinear == *(4, 3) and smallLinear == *(1, 2))
+    .check("Dedup keeps first occurrences in order", *(3, 1, 3, 2, 1)->List.Dedup == *(3, 1, 2))
+    .check("Last returns the last element", *(1, 2, 3)->List.Last == .some 3)
+    .check("Count counts the matching elements", *(1, 5, 2, 4, 3)->List.Count(box [n] n > 2) == 3)
+    .check("MinBy picks the first of equal keys", words->List.MinBy(box String.Length) == .some "a")
+    .check("MaxBy picks the first of equal keys", words->List.MaxBy(box String.Length) == .some "bb")
+} in !

@@ -353,8 +353,8 @@ pub(super) enum BytesPattern {
 impl BytesPattern {
     pub(super) async fn readback(mut handle: Handle) -> Box<Self> {
         match handle.case().await.as_str() {
-            "and" => {
-                // .and List<self>
+            "allOf" => {
+                // .allOf List<self>
                 let mut conj = Box::new(Self::All);
                 let patterns =
                     readback_list(handle, |handle| Box::pin(Self::readback(handle))).await;
@@ -398,8 +398,8 @@ impl BytesPattern {
                 let class = ByteClass::readback(handle).await;
                 Box::new(Self::One(class))
             }
-            "or" => {
-                // .or List<self>,
+            "anyOf" => {
+                // .anyOf List<self>
                 let mut disj = Box::new(Self::Nil);
                 let patterns =
                     readback_list(handle, |handle| Box::pin(Self::readback(handle))).await;

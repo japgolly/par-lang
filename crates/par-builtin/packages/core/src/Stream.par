@@ -133,6 +133,10 @@ export {
   // Concatenates a list of streams into a single stream.
   dec Concat : [<e, a> List<Stream<e, a>>] Stream<e, a>
 
+  // Maps each item to an optional value, keeping only the present results.
+  // Unlike `Filter`, this works for linear items, since the function consumes each one.
+  dec FilterMap : [<e, a> Stream<e, a>, <b> box [a] Option<b>] Stream<e, b>
+
   // Keeps the items for which the test function returns `.true!`.
   dec Filter : [<e, a: share> Stream<e, a>, box [a] Bool] Stream<e, a>
 
@@ -282,6 +286,25 @@ def Flatten = [<e, a> streams] case {
 }
 
 def Concat = [<e, a> streams] streams->FromList->Flatten
+
+def FilterMap = [<e, a> stream, <b> f] do {
+  stream.begin
+} in case {
+  .close* => stream.close,
+  .next => stream.next.case {
+    .end result => .end result,
+    .item(value) stream => f(value).case {
+      .some mapped => .item(mapped) stream.loop,
+      .none! => stream.begin@skip.next.case {
+        .end result => .end result,
+        .item(value) stream => f(value).case {
+          .some mapped => .item(mapped) stream.loop,
+          .none! => stream.loop@skip,
+        },
+      },
+    },
+  },
+}
 
 def Filter = [<e, a: share> stream, predicate] do {
   stream.begin

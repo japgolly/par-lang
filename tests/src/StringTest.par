@@ -1,0 +1,15 @@
+module StringTest
+
+import {
+  @core/String
+  @core/Test
+}
+
+def TestStringAdditions : [Test] ! = [test] do {
+  test
+    .check("Length counts characters, not bytes", String.Length("čaj") == 3)
+    .check("The empty string contains the empty pattern", String.Contains("", .empty!))
+    .check("PadLeft fills up to the width", String.PadLeft("42", 5, "0") == "00042")
+    .check("Padding past the width changes nothing", String.PadRight("abcdef", 3, "x") == "abcdef")
+    .check("Padding counts characters, not bytes", String.PadLeft("čaj", 4, " ") == " čaj")
+} in !

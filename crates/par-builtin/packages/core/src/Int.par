@@ -30,6 +30,13 @@ export {
   // ```
   dec Clamp : [Int, Int, Int] Int
 
+  // `Int.Pow(base, exponent)` raises `base` to the power `exponent`. `Int.Pow(0, 0)` is `1`.
+  //
+  // ```par
+  // Int.Pow(-2, 3)  // = -8
+  // ```
+  dec Pow : [Int, Nat] Int
+
   // `Int.Range(lo, hi)` produces the integers from `lo` (inclusive) to `hi` (exclusive).
   //
   // ```par
@@ -51,6 +58,8 @@ def Max = external
 def Abs = external
 
 def Clamp = external
+
+def Pow = external
 
 def Range = external
 

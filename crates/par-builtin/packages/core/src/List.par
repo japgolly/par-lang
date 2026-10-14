@@ -8,6 +8,7 @@ export module List
 
 import {
   Bool
+  Map as CoreMap
   Nat
   Number
   Option
@@ -50,8 +51,27 @@ export {
   // Keeps the elements for which the test function returns `.true!`.
   dec Filter : [<a: share> List<a>, box [a] Bool] List<a>
 
+  // Splits a list into the elements for which the test function returns `.true!`,
+  // and the rest. Both keep their original order.
+  //
+  // ```par
+  // *(1, 2, 3, 4)->List.Partition(box [n] n > 2)
+  // // = (*(3, 4)) *(1, 2)
+  // ```
+  dec Partition : [<a: share> List<a>, box [a] Bool] (List<a>) List<a>
+
+  // Like `Partition`, but for linear elements: the test function returns the
+  // element back along with the verdict.
+  dec PartitionLinear : [<a> List<a>, box [a] (Bool) a] (List<a>) List<a>
+
   // Returns the first element for which the test function returns `.true!`.
   dec Find : [<a: share> List<a>, box [a] Bool] Option<a>
+
+  // Returns `.true!` if the list contains an element equal to the given one.
+  dec Contains : [<a: data> List<a>, a] Bool
+
+  // Returns the number of elements for which the test function returns `.true!`.
+  dec Count : [<a> List<a>, box [a] Bool] Nat
 
   // Applies a folding function repeatedly to the current result and each list
   // element, returning the final result.
@@ -77,11 +97,24 @@ export {
   // Returns the number of elements in a list.
   dec Length : [<a: drop> List<a>] Nat
 
+  // Returns the first element, or `.none!` for an empty list.
+  dec First : [<a: drop> List<a>] Option<a>
+
+  // Returns the last element, or `.none!` for an empty list.
+  dec Last : [<a: drop> List<a>] Option<a>
+
   // Flattens a list of lists into a single list.
   dec Concat : [<a> List<List<a>>] List<a>
 
   // Returns a list with the elements in reverse order.
   dec Reverse : [<a> List<a>] List<a>
+
+  // Removes duplicate elements, keeping the first occurrence of each, in the original order.
+  //
+  // ```par
+  // *(3, 1, 3, 2, 1)->List.Dedup  // = *(3, 1, 2)
+  // ```
+  dec Dedup : [<a: data> List<a>] List<a>
 
   // Yields all items from a source list onto a destination channel, consuming the source.
   dec Copy : [<a> dual List<a>, List<a>] dual List<a>
@@ -120,6 +153,14 @@ export {
 
   // Returns the largest element, or `.none!` for an empty list.
   dec Max : [<a: data> List<a>] Option<a>
+
+  // Returns the element with the smallest extracted data key, or `.none!` for an empty list.
+  // Of elements with equal keys, the first one wins.
+  dec MinBy : [<a: share> List<a>, <k: data> box [a] k] Option<a>
+
+  // Returns the element with the largest extracted data key, or `.none!` for an empty list.
+  // Of elements with equal keys, the first one wins.
+  dec MaxBy : [<a: share> List<a>, <k: data> box [a] k] Option<a>
 
   // Sorts a list in ascending data order. Equal keys keep their original order.
   dec Sort : [<a: data> List<a>] List<a>
@@ -185,6 +226,27 @@ def Filter = [<a: share> list, f] list.begin.case {
   },
 }
 
+def Partition = [<a: share> list, predicate] list.begin.case {
+  .end! => (.end!) .end!,
+  .item(v) list => do {
+    let (yes) no = list.loop
+  } in if {
+    predicate(v) => (.item(v) yes) no,
+    else => (yes) .item(v) no,
+  },
+}
+
+def PartitionLinear = [<a> list, predicate] list.begin.case {
+  .end! => (.end!) .end!,
+  .item(v) list => do {
+    let (matches) v = predicate(v)
+    let (yes) no = list.loop
+  } in matches.case {
+    .true! => (.item(v) yes) no,
+    .false! => (yes) .item(v) no,
+  },
+}
+
 def Find = [<a: share> list, f] list.begin.case {
   .end! => .none!,
   .item(v) list => f(v).case {
@@ -192,6 +254,17 @@ def Find = [<a: share> list, f] list.begin.case {
     .false! => list.loop,
   },
 }
+
+def Contains = [<a: data> list, value] list->Any(box [v] v == value)
+
+def Count = [<a> list, predicate]
+  let count = 0
+  in list.begin.case {
+    .end! => count,
+    .item(v) list => do {
+      if predicate(v) => { count += 1 }
+    } in list.loop,
+  }
 
 def ForEach = [<r> result, <a> list, f] list.begin.case {
   .end! => result,
@@ -203,6 +276,20 @@ def Length = [<a: drop> list]
   list.begin.case {
     .end! => len,
     .item(_) list => do { len += 1 } in list.loop,
+  }
+
+def First = [<a: drop> list] list.case {
+  .end! => .none!,
+  .item(v) _ => .some v,
+}
+
+def Last = [<a: drop> list]
+  let last: Option<a> = .none!
+  in list.begin.case {
+    .end! => last,
+    .item(v) list => do {
+      let last = .some v
+    } in list.loop,
   }
 
 def Concat = [<a> lists] chan yield {
@@ -224,6 +311,19 @@ def Reverse = [<a> list]
     .item(v) list => do {
       let reversed = .item(v) reversed
     } in list.loop,
+  }
+
+def Dedup = [<a: data> list]
+  let seen = CoreMap.New(type a, type !)
+  in list.begin.case {
+    .end! => .end!,
+    .item(v) list => do {
+      seen.entry(v)[found]
+      seen.put(!)
+    } in if {
+      found is .some! => list.loop,
+      else => .item(v) list.loop,
+    },
   }
 
 def Copy = [<a> dst, src] do {
@@ -332,6 +432,40 @@ def Max = [<a: data> list] list.case {
       .end! => best,
       .item(v) list => do {
         if v > best => { let best = v }
+      } in list.loop,
+    }
+  },
+}
+
+def MinBy = [<a: share> list, <k: data> key] list.case {
+  .end! => .none!,
+  .item(best) list => .some {
+    let bestKey = key(best)
+    in list.begin.case {
+      .end! => best,
+      .item(v) list => do {
+        let k = key(v)
+        if k < bestKey => {
+          let best = v
+          let bestKey = k
+        }
+      } in list.loop,
+    }
+  },
+}
+
+def MaxBy = [<a: share> list, <k: data> key] list.case {
+  .end! => .none!,
+  .item(best) list => .some {
+    let bestKey = key(best)
+    in list.begin.case {
+      .end! => best,
+      .item(v) list => do {
+        let k = key(v)
+        if k > bestKey => {
+          let best = v
+          let bestKey = k
+        }
       } in list.loop,
     }
   },

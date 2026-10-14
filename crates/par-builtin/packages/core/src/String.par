@@ -86,8 +86,8 @@ export {
   // - `.repeat p` — matches zero or more repetitions of pattern `p`.
   // - `.repeat1 p` — matches one or more repetitions of pattern `p`.
   // - `.concat ps` — matches a sequence of patterns in order.
-  // - `.and ps` — matches only if all patterns match the same input.
-  // - `.or ps` — matches if any of the patterns match.
+  // - `.allOf ps` — matches only if all patterns match the same input.
+  // - `.anyOf ps` — matches if any of the patterns match.
   //
   // Common idiom: `.repeat.one.any!` matches any number of any characters.
   type Pattern = recursive either {
@@ -100,12 +100,17 @@ export {
     .repeat self,
     .repeat1 self,
     .concat List<self>,
-    .and List<self>,
-    .or List<self>,
+    .allOf List<self>,
+    .anyOf List<self>,
   }
 
   // Wraps a string in quotes with escape sequences (e.g. `\n`, `\t`, `\\`).
   dec Quote : [String] String
+
+  // Returns the number of Unicode characters in a string.
+  //
+  // This differs from `Bytes.Length`, which counts the bytes of the UTF-8 encoding.
+  dec Length : [String] Nat
 
   // Decodes bytes as UTF-8 into a string, replacing invalid sequences with the
   // Unicode replacement character.
@@ -163,6 +168,9 @@ export {
   // Returns `.true!` if a whole string matches a pattern.
   dec Matches : [String, Pattern] Bool
 
+  // Returns `.true!` if a pattern matches somewhere in a string.
+  dec Contains : [String, Pattern] Bool
+
   // Returns the first substring matched by a pattern, if one exists.
   dec Find : [String, Pattern] Option<String>
 
@@ -202,12 +210,33 @@ export {
   // Splits a string into a list of Unicode characters.
   dec Chars : [String] List<Char>
 
+  // Repeats a string the given number of times.
+  //
+  // ```par
+  // String.Repeat("ab", 3)  // = "ababab"
+  // ```
+  dec Repeat : [String, Nat] String
+
+  // `String.PadLeft(s, width, fill)` prepends `fill` until `s` is `width` characters long.
+  // Strings already at least `width` characters long are returned unchanged.
+  //
+  // ```par
+  // String.PadLeft("42", 5, "0")  // = "00042"
+  // ```
+  dec PadLeft : [String, Nat, Char] String
+
+  // `String.PadRight(s, width, fill)` appends `fill` until `s` is `width` characters long.
+  // Strings already at least `width` characters long are returned unchanged.
+  dec PadRight : [String, Nat, Char] String
+
   // Reads all bytes from a `Reader` and decodes them into a `String`,
   // replacing invalid sequences with the Unicode replacement character.
   dec ReadAll : [<e> Bytes.Reader<e>] Try<e, String>
 }
 
 def Quote = external
+
+def Length = external
 
 def FromBytes = external
 
@@ -231,7 +260,7 @@ def Close = [<e> parser] parser.case {
   .ready parser => parser.close,
 }
 
-def Lines = [<e: drop> parser] parser->SplitByPattern(.or *(.str "\r\n", .str "\n"))
+def Lines = [<e: drop> parser] parser->SplitByPattern(.anyOf *(.str "\r\n", .str "\n"))
 
 def SplitBy = [<e: drop> parser, separator] parser->SplitByPattern(.str separator)
 
@@ -305,6 +334,8 @@ def Matches = [string, pattern] Parse(string).case {
   }
 }
 
+def Contains = [string, pattern] string->Find(pattern) is .some _
+
 def Find = [string, pattern] Parse(string).case {
   .empty! => pattern->ContainsEmpty.case {
     .true! => .some "",
@@ -375,6 +406,23 @@ def Chars = [string] Parse(string).begin.case {
   } in .item(char) parser.loop,
 }
 
+def Repeat = [string, count]
+  let builder = Builder
+  in Nat.Repeat(count).begin.case {
+    .end! => builder.build,
+    .step next => do {
+      builder.add(string)
+    } in next.loop,
+  }
+
+def PadLeft = [string, width, fill]
+  let padding = fill->Repeat(Nat.Max(0, width - string->Length))
+  in `${padding}${string}`
+
+def PadRight = [string, width, fill]
+  let padding = fill->Repeat(Nat.Max(0, width - string->Length))
+  in `${string}${padding}`
+
 def ReadAll = [<e> reader] ParseReader(reader)->Remainder
 
 // Helpers
@@ -390,6 +438,6 @@ def ContainsEmpty = [pattern] pattern.begin.case {
   .repeat _ => .true!,
   .repeat1 p => p.loop,
   .concat ps => ps->List.All(box [p] p.loop),
-  .and ps => ps->List.All(box [p] p.loop),
-  .or ps => ps->List.Any(box [p] p.loop),
+  .allOf ps => ps->List.All(box [p] p.loop),
+  .anyOf ps => ps->List.Any(box [p] p.loop),
 }

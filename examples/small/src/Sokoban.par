@@ -124,9 +124,9 @@ def Move = [level, (player, boxes)!, direction] do {
   let beyond = Step(next, direction)
   let walls = level.walls
 } in if {
-  walls->Has(next) => .none!,
-  not boxes->Has(next) => .some (next, boxes)!,
-  walls->Has(beyond) or boxes->Has(beyond) => .none!,
+  walls->List.Contains(next) => .none!,
+  not boxes->List.Contains(next) => .some (next, boxes)!,
+  walls->List.Contains(beyond) or boxes->List.Contains(beyond) => .none!,
   else => .some (next, List.Map(boxes, box [at] if { at == next => beyond, else => at }))!,
 }
 
@@ -139,7 +139,7 @@ def Step = [(x, y)!, direction] direction.case {
 }
 
 dec Solved : [Level, State] Bool
-def Solved = [level, (_, boxes)!] List.All(boxes, box [at] level.goals->Has(at))
+def Solved = [level, (_, boxes)!] List.All(boxes, box [at] level.goals->List.Contains(at))
 
 // Clears the terminal and draws the level with a message below. Each square is
 // two characters wide, so that the level looks about as tall as it is wide.
@@ -150,10 +150,10 @@ def Screen = [level, (player, boxes)!, facing, message] do {
   let board = String.Join(List.Map(level.rows, box [row]
     String.Concat(List.Map(row, box [at] if {
       at == player => Color("1;36", PlayerGlyph(facing)),
-      boxes->Has(at) and goals->Has(at) => Color("32", "◉ "),
-      boxes->Has(at) => Color("33", "● "),
-      goals->Has(at) => Color("31", "○ "),
-      walls->Has(at) => "██",
+      boxes->List.Contains(at) and goals->List.Contains(at) => Color("32", "◉ "),
+      boxes->List.Contains(at) => Color("33", "● "),
+      goals->List.Contains(at) => Color("31", "○ "),
+      walls->List.Contains(at) => "██",
       else => "  ",
     }))
   ), "\n")
@@ -183,7 +183,7 @@ def Load = [layout] do {
 
   // The coordinates of the squares marked with one of the given characters.
   let find = box [marks: List<Char>] List.FilterMap(List.Concat(squares), box [(at) char] if {
-    marks->List.Any(box [mark] mark == char) => .some at,
+    marks->List.Contains(char) => .some at,
     else => .none!,
   })
 
@@ -199,6 +199,3 @@ def Load = [layout] do {
   .walls => walls,
   .goals => goals,
 }) (player, find(*("$", "*")))!
-
-dec Has : [List<Coord>, Coord] Bool
-def Has = [list, coord] List.Any(list, box [at] at == coord)

@@ -68,11 +68,14 @@ async fn char_is(mut handle: Handle) {
 pub(super) enum CharClass {
     Any,
     Char(char),
+    Range(char, char),
     Whitespace,
     AsciiAny,
     AsciiAlpha,
     AsciiAlphanum,
     AsciiDigit,
+    AsciiLower,
+    AsciiUpper,
 }
 
 impl CharClass {
@@ -99,9 +102,23 @@ impl CharClass {
                     handle.continue_();
                     Self::AsciiDigit
                 }
+                "lower" => {
+                    handle.continue_();
+                    Self::AsciiLower
+                }
+                "upper" => {
+                    handle.continue_();
+                    Self::AsciiUpper
+                }
                 _ => unreachable!(),
             },
             "char" => Self::Char(handle.char().await),
+            "range" => {
+                let min = handle.receive().char().await;
+                let max = handle.receive().char().await;
+                handle.continue_();
+                Self::Range(min, max)
+            }
             "whitespace" => {
                 handle.continue_();
                 Self::Whitespace
@@ -114,11 +131,14 @@ impl CharClass {
         match self {
             Self::Any => true,
             Self::Char(ch1) => ch == *ch1,
+            Self::Range(min, max) => *min <= ch && ch <= *max,
             Self::Whitespace => ch.is_whitespace(),
             Self::AsciiAny => ch.is_ascii(),
             Self::AsciiAlpha => ch.is_ascii_alphabetic(),
             Self::AsciiAlphanum => ch.is_ascii_alphanumeric(),
             Self::AsciiDigit => ch.is_ascii_digit(),
+            Self::AsciiLower => ch.is_ascii_lowercase(),
+            Self::AsciiUpper => ch.is_ascii_uppercase(),
         }
     }
 }

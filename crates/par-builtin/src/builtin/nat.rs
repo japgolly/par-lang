@@ -3,7 +3,7 @@ use arcstr::literal;
 use num_bigint::{BigInt, BigUint};
 
 use num_integer::Integer;
-use num_traits::Zero;
+use num_traits::{Pow, Zero};
 use par_core::frontend::{ExternalTypeDef, PrimitiveType, Type};
 use par_core::source::Span;
 use par_runtime::external_def;
@@ -27,6 +27,7 @@ external_def! {
         Min => nat_min,
         Max => nat_max,
         Clamp => nat_clamp,
+        Pow => nat_pow,
         Repeat => nat_repeat,
         RepeatLazy => nat_repeat_lazy,
         Range => nat_range,
@@ -61,6 +62,12 @@ async fn nat_clamp(mut handle: Handle) {
     // int clamped to two nats is always nat, so we can ignore the sign.
     let (_sign, clamped) = int.min(max.into()).max(min.into()).into_parts();
     handle.provide_nat(clamped);
+}
+
+async fn nat_pow(mut handle: Handle) {
+    let base = handle.receive().nat().await;
+    let exponent = handle.receive().nat().await;
+    handle.provide_nat(base.pow(exponent));
 }
 
 async fn nat_repeat(mut handle: Handle) {

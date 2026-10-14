@@ -1,0 +1,18 @@
+module NumberTest
+
+import {
+  @core/Float
+  @core/Int
+  @core/Test
+}
+
+def TestNumberAdditions : [Test] ! = [test] do {
+  test
+    .check("Int.Pow of a negative base and odd exponent is negative", Int.Pow(-2, 3) == -8)
+    .check("Int.Pow of a negative base and even exponent is positive", Int.Pow(-2, 4) == 16)
+    .check("Float.Log10", Float.Equals(Float.Log10(1000.0), 3.0, 0.000001))
+    .check("Float.Log2", Float.Equals(Float.Log2(8.0), 3.0, 0.000001))
+    .check("Float.Asin", Float.Equals(Float.Asin(1.0), Float.Pi / 2.0, 0.000001))
+    .check("Float.Acos", Float.Equals(Float.Acos(1.0), 0.0, 0.000001))
+    .check("Float.Atan", Float.Equals(Float.Atan(1.0), Float.Pi / 4.0, 0.000001))
+} in !

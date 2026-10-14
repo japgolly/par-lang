@@ -11,20 +11,26 @@ export {
   //
   // - `.any!` — any character.
   // - `.char c` — a specific character.
+  // - `.range(lo, hi)!` — characters in the inclusive range `[lo, hi]`, by code point.
   // - `.whitespace!` — any whitespace character.
   // - `.ascii.any!` — any ASCII character.
   // - `.ascii.alpha!` — ASCII letter (`a-z`, `A-Z`).
   // - `.ascii.alphanum!` — ASCII letter or digit.
   // - `.ascii.digit!` — ASCII digit (`0-9`).
+  // - `.ascii.lower!` — ASCII lowercase letter (`a-z`).
+  // - `.ascii.upper!` — ASCII uppercase letter (`A-Z`).
   type Class = either {
     .any!,
     .char Char,
+    .range(Char, Char)!,
     .whitespace!,
     .ascii either {
       .any!,
       .alpha!,
       .alphanum!,
       .digit!,
+      .lower!,
+      .upper!,
     },
   }
 

@@ -6,6 +6,7 @@ export module Os
 
 import {
   @core/BoxMap
+  @core/Bool
   @core/Bytes
   @core/List
   @core/Option
@@ -42,6 +43,16 @@ export {
   // Creates a `Path` from its byte representation.
   dec Path : [Bytes] Path
 
+  // Tests whether a path exists. Returns `.false!` if that can't be determined,
+  // e.g. due to missing permissions.
+  dec Exists : [Path] Bool
+
+  // Tests whether a path exists and is a file, following symlinks.
+  dec IsFile : [Path] Bool
+
+  // Tests whether a path exists and is a directory, following symlinks.
+  dec IsDir : [Path] Bool
+
   // Standard input as a byte reader.
   dec Stdin : Reader
 
@@ -66,6 +77,12 @@ export {
   // Opens or creates a file for appending.
   dec CreateOrAppendToFile : [Path] Try<Error, Writer>
 
+  // Reads a whole file into memory.
+  dec ReadFile : [Path] Try<Error, Bytes>
+
+  // Writes bytes to a file, creating it or replacing its contents.
+  dec WriteFile : [Path, Bytes] Try<Error, !>
+
   // Creates a directory and all necessary parent directories.
   dec CreateDir : [Path] Try<Error, !>
 
@@ -74,6 +91,12 @@ export {
 
   // Removes an empty directory.
   dec RemoveDir : [Path] Try<Error, !>
+
+  // Removes a directory together with everything inside it.
+  dec RemoveDirAll : [Path] Try<Error, !>
+
+  // Copies a file's contents to another path, replacing that file if it exists.
+  dec CopyFile : [Path, Path] Try<Error, !>
 
   // Moves or renames a file.
   dec MoveFile : [Path, Path] Try<Error, !>
@@ -102,6 +125,12 @@ export {
 
 def Path = external
 
+def Exists = external
+
+def IsFile = external
+
+def IsDir = external
+
 def Stdin = external
 
 def Stdout = external
@@ -118,11 +147,25 @@ def AppendToFile = external
 
 def CreateOrAppendToFile = external
 
+def ReadFile = [path] catch e => .err e in do {
+  let try reader = path->OpenFile
+} in reader->Bytes.ReadAll
+
+def WriteFile = [path, bytes] catch e => .err e in do {
+  let try writer = path->CreateOrReplaceFile
+  writer.write(bytes).try
+  writer.close.try
+} in .ok!
+
 def CreateDir = external
 
 def RemoveFile = external
 
 def RemoveDir = external
+
+def RemoveDirAll = external
+
+def CopyFile = external
 
 def MoveFile = external
 

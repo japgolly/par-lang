@@ -48,9 +48,14 @@ external_def! {
         Sqrt => float_sqrt,
         Exp => float_exp,
         Ln => float_ln,
+        Log10 => float_log10,
+        Log2 => float_log2,
         Sin => float_sin,
         Cos => float_cos,
         Tan => float_tan,
+        Asin => float_asin,
+        Acos => float_acos,
+        Atan => float_atan,
         Atan2 => float_atan2,
     }
 }
@@ -232,6 +237,16 @@ async fn float_ln(mut handle: Handle) {
     handle.provide_float(value.ln());
 }
 
+async fn float_log10(mut handle: Handle) {
+    let value = handle.receive().float().await;
+    handle.provide_float(value.log10());
+}
+
+async fn float_log2(mut handle: Handle) {
+    let value = handle.receive().float().await;
+    handle.provide_float(value.log2());
+}
+
 async fn float_sin(mut handle: Handle) {
     let value = handle.receive().float().await;
     handle.provide_float(value.sin());
@@ -245,6 +260,21 @@ async fn float_cos(mut handle: Handle) {
 async fn float_tan(mut handle: Handle) {
     let value = handle.receive().float().await;
     handle.provide_float(value.tan());
+}
+
+async fn float_asin(mut handle: Handle) {
+    let value = handle.receive().float().await;
+    handle.provide_float(value.asin());
+}
+
+async fn float_acos(mut handle: Handle) {
+    let value = handle.receive().float().await;
+    handle.provide_float(value.acos());
+}
+
+async fn float_atan(mut handle: Handle) {
+    let value = handle.receive().float().await;
+    handle.provide_float(value.atan());
 }
 
 async fn float_atan2(mut handle: Handle) {

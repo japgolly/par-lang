@@ -1,0 +1,33 @@
+module JsonTest
+
+import {
+  @core/Json
+  @core/List
+  @core/Test
+}
+
+def Users = Json.Object(Json.Field("users", Json.List(Json.Object(Json.Field("name", Json.String)))))
+
+def Kind = Json.Tagged("kind", *((.string "a", Json.Empty) box [!] !))
+
+def TestJsonErrorPaths : [Test] ! = [test] do {
+  test
+    .check("A nested mismatch reports its full path",
+      Json.Parse(`{"users": [{"name": "a"}, {"name": 1}]}`, Users) == .err ".users[1].name: expected a string, found a number")
+    .check("A missing field is reported at its path",
+      Json.Parse(`{"users": [{}]}`, Users) == .err ".users[0].name: missing")
+    .check("An unknown tag is reported at the tag field",
+      Json.Parse(`{"kind": "b"}`, Kind) == .err `.kind: unknown tag "b"`)
+} in !
+
+def TestJsonNumberAndDictFormats : [Test] ! = [test] do {
+  test
+    .check("Int rejects fractions",
+      Json.Parse("[1, 2.5]", Json.List(Json.Int)) == .err "[1]: expected an integer, found 2.5")
+    .check("Nat rejects negative integers",
+      Json.Parse("-3", Json.Nat) == .err "expected a non-negative integer, found -3")
+    .check("Dict parses every value",
+      Json.Parse(`{"b": 2, "a": 1}`, Json.Dict(Json.Nat)) is .ok dict and dict.list == *(("a") 1, ("b") 2))
+    .check("Dict reports the key of a bad value",
+      Json.Parse(`{"a": "x"}`, Json.Dict(Json.Nat)) is .err e and e == ".a: expected an integer, found a string")
+} in !
