@@ -20,8 +20,8 @@ export {
   // The result is always a `Nat`, even though `m` is an `Int`.
   dec Max : [Nat, Int] Nat
 
-  // `Nat.Clamp(x)(lo, hi)` clamps `x` to the inclusive range `[lo, hi]`.
-  dec Clamp : [Int] [Nat, Nat] Nat
+  // `Nat.Clamp(x, lo, hi)` clamps `x` to the inclusive range `[lo, hi]`.
+  dec Clamp : [Int, Nat, Nat] Nat
 
   // Produces `n` repetitions of `.step`, followed by `.end!`.
   //

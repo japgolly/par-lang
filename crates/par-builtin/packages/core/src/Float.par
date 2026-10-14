@@ -68,8 +68,8 @@ export {
   // Returns the larger input, or `NaN` if either input is `NaN`.
   dec Max : [Float, Float] Float
 
-  // `Float.Clamp(value)(lo, hi)` computes `Float.Max(Float.Min(value, hi), lo)`.
-  dec Clamp : [Float] [Float, Float] Float
+  // `Float.Clamp(value, lo, hi)` computes `Float.Max(Float.Min(value, hi), lo)`.
+  dec Clamp : [Float, Float, Float] Float
 
   // `Float.Equals(left, right, tolerance)` tests whether `left` and `right`
   // differ by at most `tolerance`.

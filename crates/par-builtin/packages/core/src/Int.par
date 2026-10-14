@@ -22,13 +22,13 @@ export {
   // Returns the absolute value of an integer as a natural number.
   dec Abs : [Int] Nat
 
-  // `Int.Clamp(x)(lo, hi)` clamps `x` to the inclusive range `[lo, hi]`.
+  // `Int.Clamp(x, lo, hi)` clamps `x` to the inclusive range `[lo, hi]`.
   //
   // ```par
-  // Int.Clamp(7)(0, 5)   // = 5
-  // Int.Clamp(-3)(0, 5)  // = 0
+  // Int.Clamp(7, 0, 5)   // = 5
+  // Int.Clamp(-3, 0, 5)  // = 0
   // ```
-  dec Clamp : [Int] [Int, Int] Int
+  dec Clamp : [Int, Int, Int] Int
 
   // `Int.Range(lo, hi)` produces the integers from `lo` (inclusive) to `hi` (exclusive).
   //
