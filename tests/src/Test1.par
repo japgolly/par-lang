@@ -9,6 +9,6 @@ def Add: [Nat, Nat] Nat = [a, b]
   a + b
 
 def TestSimple: [Test] ! = [test] do {
-  test.assert("2 + 2 = 4", Add(2, 2) == 4)
-  test.assert("10 + 5 = 15", Add(10, 5) == 15)
+  test.check("2 + 2 = 4", Add(2, 2) == 4)
+  test.check("10 + 5 = 15", Add(10, 5) == 15)
 } in !

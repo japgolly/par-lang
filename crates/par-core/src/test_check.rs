@@ -3,23 +3,22 @@ use std::sync::mpsc;
 use par_runtime::readback::Handle;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AssertionResult {
+pub struct CheckResult {
     pub description: String,
     pub passed: bool,
 }
 
-pub async fn provide_test(handle: Handle, sender: mpsc::Sender<AssertionResult>) {
+pub async fn provide_test(handle: Handle, sender: mpsc::Sender<CheckResult>) {
     provide_test_inner(handle, sender);
 }
 
-fn provide_test_inner(handle: Handle, sender: mpsc::Sender<AssertionResult>) {
+fn provide_test_inner(handle: Handle, sender: mpsc::Sender<CheckResult>) {
     handle.provide_box(move |mut handle| {
         let sender = sender.clone();
         async move {
             match handle.case().await.as_str() {
-                "assert" => {
+                "check" => {
                     let description = handle.receive().string().await.as_str().to_string();
-                    println!("{}", description);
                     let mut bool_handle = handle.receive();
 
                     let passed = match bool_handle.case().await.as_str() {
@@ -33,37 +32,17 @@ fn provide_test_inner(handle: Handle, sender: mpsc::Sender<AssertionResult>) {
                         }
                         variant => {
                             panic!(
-                                "Test.assert expected Bool, got unexpected variant: {}",
+                                "Test.check expected Bool, got unexpected variant: {}",
                                 variant
                             );
                         }
                     };
 
-                    let result = AssertionResult {
+                    let result = CheckResult {
                         description,
                         passed,
                     };
                     let _ = sender.send(result);
-
-                    provide_test_inner(handle, sender);
-                }
-                "done" => {
-                    handle.break_();
-                }
-                "id" => {
-                    let argument = handle.send();
-                    argument.provide_box(|mut handle| async move {
-                        let arg = handle.receive();
-                        handle.link(arg);
-                    });
-
-                    provide_test_inner(handle, sender);
-                }
-                "leak" => {
-                    let argument = handle.send();
-                    argument.provide_box(|handle| async move {
-                        drop(handle);
-                    });
 
                     provide_test_inner(handle, sender);
                 }

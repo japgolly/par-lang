@@ -24,8 +24,8 @@ def TestDropBuiltinBox: [Test] ! = [test] do {
       let pair: (Url.Url) Bytes.Reader<either {}> = (u) Bytes.Reader("abc")
     }
   }
-  test.assert("dropping a value containing a builtin box doesn't crash", .true!)
-} in test.done
+  test.check("dropping a value containing a builtin box doesn't crash", .true!)
+} in !
 
 // An empty write to a pipe produces no chunk; readers never see empty chunks.
 def TestPipeReaderEmptyWrite: [Test] ! = [test] do {
@@ -39,37 +39,37 @@ def TestPipeReaderEmptyWrite: [Test] ! = [test] do {
     } in .ok!
   )
   let result = String.ParseReader(reader)->String.Remainder
-  test.assert("empty writes are skipped", result is .ok s and s == "ab")
-} in test.done
+  test.check("empty writes are skipped", result is .ok s and s == "ab")
+} in !
 
 // Header values are bytes, and requests that can't be sent are reported as errors,
 // before anything goes over the network.
 def TestFetchRejectsInvalidRequests: [Test] ! = [test]
   Url.FromString("http://127.0.0.1:9").case {
-    .err _ => do { test.assert("the test URL parses", .false!) } in test.done,
+    .err _ => do { test.check("the test URL parses", .false!) } in !,
     .ok url => do {
       let header = Bytes.Builder.add("a").add(<<10>>).build
       let badHeader = Http.Fetch(("GET", url, *(("X-Test") header)) Bytes.EmptyReader)
-      test.assert("a header value with a newline is rejected", badHeader is .err _)
+      test.check("a header value with a newline is rejected", badHeader is .err _)
       let badMethod = Http.Fetch(("NOT A METHOD", url, *()) Bytes.EmptyReader)
-      test.assert("an invalid method is rejected", badMethod is .err _)
-    } in test.done,
+      test.check("an invalid method is rejected", badMethod is .err _)
+    } in !,
   }
 
 def TestIntDivisionRoundsDown: [Test] ! = [test] do {
   let x: Int = -7
-  test.assert("-7 / 2 rounds down", x / 2 == -4)
-  test.assert("division agrees with Int.Mod", {x / 2} * 2 + Int.Mod(x, 2) == x)
-  test.assert("7 / 2 rounds down", 7 / 2 == 3)
-  test.assert("dividing by zero gives zero", x / 0 == 0)
-} in test.done
+  test.check("-7 / 2 rounds down", x / 2 == -4)
+  test.check("division agrees with Int.Mod", {x / 2} * 2 + Int.Mod(x, 2) == x)
+  test.check("7 / 2 rounds down", 7 / 2 == 3)
+  test.check("dividing by zero gives zero", x / 0 == 0)
+} in !
 
 def TestZeroTimesFloat: [Test] ! = [test] do {
   let zero = Number.Zero(type Float)
-  test.assert("zero times NaN is NaN", Float.IsNaN(zero * Float.NaN))
-  test.assert("zero times infinity is NaN", Float.IsNaN(Float.Inf * zero))
-  test.assert("zero times a number is zero", zero * 5.0 == 0.0)
-} in test.done
+  test.check("zero times NaN is NaN", Float.IsNaN(zero * Float.NaN))
+  test.check("zero times infinity is NaN", Float.IsNaN(Float.Inf * zero))
+  test.check("zero times a number is zero", zero * 5.0 == 0.0)
+} in !
 
 // Map versions share their values, so replacing or deleting a value in one version
 // keeps it in the others.
@@ -77,9 +77,9 @@ def TestBoxMapVersionsKeepTheirValues: [Test] ! = [test] do {
   let m1 = BoxMap.New(type String, type Nat).put("a", 1)
   let m2 = m1.put("a", 2)
   let m3 = m2.delete("a")
-  test.assert("the first version keeps its value", m1.get("a") is .some n and n == 1)
-  test.assert("the second version has the new value", m2.get("a") is .some n and n == 2)
-  test.assert("the third version has no value", m3.get("a") is .none!)
+  test.check("the first version keeps its value", m1.get("a") is .some n and n == 1)
+  test.check("the second version has the new value", m2.get("a") is .some n and n == 2)
+  test.check("the third version has no value", m3.get("a") is .none!)
   let m4 = BoxMap.FromList(*(("a") 1, ("a") 2))
-  test.assert("the last repeated key wins", m4.get("a") is .some n and n == 2)
-} in test.done
+  test.check("the last repeated key wins", m4.get("a") is .some n and n == 2)
+} in !

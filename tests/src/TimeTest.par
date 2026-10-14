@@ -24,16 +24,16 @@ def ZoneOf : [String] Time.Zone = [name] Time.Zone(name).case {
 
 def TestDuration : [Test] ! = [test] do {
   test
-    .assert("a minute is 60 seconds", Time.Minute == 60 * Time.Second)
-    .assert("an hour is 60 minutes", Time.Hour == 60 * Time.Minute)
+    .check("a minute is 60 seconds", Time.Minute == 60 * Time.Second)
+    .check("an hour is 60 minutes", Time.Hour == 60 * Time.Minute)
 } in !
 
 def TestDurationShow : [Test] ! = [test] do {
   test
-    .assert("renders compound durations", Time.Show(Time.Hour + 30 * Time.Minute + 15 * Time.Second) == "1h30m15s")
-    .assert("renders negative durations", Time.Show(-2 * Time.Minute) == "-2m")
-    .assert("renders zero", Time.Show(0) == "0s")
-    .assert("renders sub-second parts", Time.Show(1500 * Time.Millisecond) == "1s500ms")
+    .check("renders compound durations", Time.Show(Time.Hour + 30 * Time.Minute + 15 * Time.Second) == "1h30m15s")
+    .check("renders negative durations", Time.Show(-2 * Time.Minute) == "-2m")
+    .check("renders zero", Time.Show(0) == "0s")
+    .check("renders sub-second parts", Time.Show(1500 * Time.Millisecond) == "1s500ms")
 } in !
 
 // --- Instants -------------------------------------------------------------
@@ -41,16 +41,16 @@ def TestDurationShow : [Test] ! = [test] do {
 def TestInstant : [Test] ! = [test] do {
   let later = Time.Epoch.add(90 * Time.Second)
   test
-    .assert("the epoch is at unix nanos zero", Time.Epoch.unixNanos == 0)
-    .assert("add shifts by a duration", later.unixNanos == 90 * Time.Second)
-    .assert("Since is the difference", Time.Since(later, Time.Epoch) == 90 * Time.Second)
-    .assert("Since is signed", Time.Since(Time.Epoch, later) == -90 * Time.Second)
-    .assert("Compare orders instants", Time.Compare(later, Time.Epoch) is .greater!)
-    .assert("Compare detects equality", Time.Compare(Time.Epoch, Time.Epoch) is .equal!)
+    .check("the epoch is at unix nanos zero", Time.Epoch.unixNanos == 0)
+    .check("add shifts by a duration", later.unixNanos == 90 * Time.Second)
+    .check("Since is the difference", Time.Since(later, Time.Epoch) == 90 * Time.Second)
+    .check("Since is signed", Time.Since(Time.Epoch, later) == -90 * Time.Second)
+    .check("Compare orders instants", Time.Compare(later, Time.Epoch) is .greater!)
+    .check("Compare detects equality", Time.Compare(Time.Epoch, Time.Epoch) is .equal!)
 } in !
 
 def TestNow : [Test] ! = [test] do {
-  test.assert("now is after the epoch", Time.Compare(Time.Now, Time.Epoch) is .greater!)
+  test.check("now is after the epoch", Time.Compare(Time.Now, Time.Epoch) is .greater!)
 } in !
 
 // --- Zones and civil date-times -------------------------------------------
@@ -58,25 +58,25 @@ def TestNow : [Test] ! = [test] do {
 def TestInZoneUtc : [Test] ! = [test] do {
   let z = Time.InZone(Time.Epoch, Time.UTC)
   test
-    .assert("the epoch is in 1970", z.year == 1970)
-    .assert("the epoch is in January", z.month == 1)
-    .assert("the epoch is on the 1st", z.day == 1)
-    .assert("the epoch is at midnight", z.hour == 0)
-    .assert("the epoch was a Thursday", z.weekday is .thursday!)
+    .check("the epoch is in 1970", z.year == 1970)
+    .check("the epoch is in January", z.month == 1)
+    .check("the epoch is on the 1st", z.day == 1)
+    .check("the epoch is at midnight", z.hour == 0)
+    .check("the epoch was a Thursday", z.weekday is .thursday!)
 } in !
 
 def TestOffsetZone : [Test] ! = [test] do {
   let z = Time.InZone(Time.Epoch, Time.Offset(-8 * Time.Hour))
   test
-    .assert("a -8h offset rolls back to 1969", z.year == 1969)
-    .assert("a -8h offset shows 16:00", z.hour == 16)
+    .check("a -8h offset rolls back to 1969", z.year == 1969)
+    .check("a -8h offset shows 16:00", z.hour == 16)
 } in !
 
 def TestZonedAccessors : [Test] ! = [test] do {
   let z = Time.InZone(Time.Epoch, Time.UTC)
   test
-    .assert("the underlying instant is the epoch", z.instant.unixNanos == 0)
-    .assert("the zone reports its name", z.zone.name == "UTC")
+    .check("the underlying instant is the epoch", z.instant.unixNanos == 0)
+    .check("the zone reports its name", z.zone.name == "UTC")
 } in !
 
 def TestZoneLookup : [Test] ! = [test] do {
@@ -89,8 +89,8 @@ def TestZoneLookup : [Test] ! = [test] do {
     .none! => .true!,
   }
   test
-    .assert("a real IANA name resolves", resolved)
-    .assert("an unknown name does not resolve", rejected)
+    .check("a real IANA name resolves", resolved)
+    .check("an unknown name does not resolve", rejected)
 } in !
 
 def TestDaylightSaving : [Test] ! = [test] do {
@@ -98,16 +98,16 @@ def TestDaylightSaving : [Test] ! = [test] do {
   let summer = InstantOf("2024-07-01T00:00:00Z")
   let winter = InstantOf("2024-01-01T00:00:00Z")
   test
-    .assert("New York is on EDT (-4h) in July", ny.offsetAt(summer) == -4 * Time.Hour)
-    .assert("New York is on EST (-5h) in January", ny.offsetAt(winter) == -5 * Time.Hour)
+    .check("New York is on EDT (-4h) in July", ny.offsetAt(summer) == -4 * Time.Hour)
+    .check("New York is on EST (-5h) in January", ny.offsetAt(winter) == -5 * Time.Hour)
 } in !
 
 // --- RFC 3339 -------------------------------------------------------------
 
 def TestRfc3339 : [Test] ! = [test] do {
   test
-    .assert("renders the epoch", Time.ToRFC3339(Time.Epoch) == "1970-01-01T00:00:00Z")
-    .assert("round-trips a timestamp", Time.ToRFC3339(InstantOf("2024-07-01T12:34:56Z")) == "2024-07-01T12:34:56Z")
+    .check("renders the epoch", Time.ToRFC3339(Time.Epoch) == "1970-01-01T00:00:00Z")
+    .check("round-trips a timestamp", Time.ToRFC3339(InstantOf("2024-07-01T12:34:56Z")) == "2024-07-01T12:34:56Z")
 } in !
 
 // --- At and Parse ---------------------------------------------------------
@@ -116,20 +116,20 @@ def TestAt : [Test] ! = [test]
   Time.At(Time.UTC, 2024, 2, 29, 12, 30, 45).case {
     .some d => do {
       test
-        .assert("leap day keeps the year", d.year == 2024)
-        .assert("leap day keeps the month", d.month == 2)
-        .assert("leap day is the 29th", d.day == 29)
-        .assert("the hour is set", d.hour == 12)
-        .assert("the minute is set", d.minute == 30)
-        .assert("the second is set", d.second == 45)
+        .check("leap day keeps the year", d.year == 2024)
+        .check("leap day keeps the month", d.month == 2)
+        .check("leap day is the 29th", d.day == 29)
+        .check("the hour is set", d.hour == 12)
+        .check("the minute is set", d.minute == 30)
+        .check("the second is set", d.second == 45)
     } in !,
-    .none! => do { test.assert("2024-02-29 should be a valid date", .false!) } in !,
+    .none! => do { test.check("2024-02-29 should be a valid date", .false!) } in !,
   }
 
 def TestAtRejectsInvalid : [Test] ! = [test]
   Time.At(Time.UTC, 2023, 2, 29, 0, 0, 0).case {
-    .some _ => do { test.assert("2023-02-29 should be rejected", .false!) } in !,
-    .none! => do { test.assert("2023-02-29 is correctly rejected", .true!) } in !,
+    .some _ => do { test.check("2023-02-29 should be rejected", .false!) } in !,
+    .none! => do { test.check("2023-02-29 is correctly rejected", .true!) } in !,
   }
 
 def TestCalendarArithmetic : [Test] ! = [test]
@@ -137,20 +137,20 @@ def TestCalendarArithmetic : [Test] ! = [test]
     .some d => do {
       let nextMonth = d.addMonths(1)
       test
-        .assert("Jan 31 + 1 month lands in February", nextMonth.month == 2)
-        .assert("Jan 31 + 1 month clamps to the 29th", nextMonth.day == 29)
+        .check("Jan 31 + 1 month lands in February", nextMonth.month == 2)
+        .check("Jan 31 + 1 month clamps to the 29th", nextMonth.day == 29)
     } in !,
-    .none! => do { test.assert("the base date should be valid", .false!) } in !,
+    .none! => do { test.check("the base date should be valid", .false!) } in !,
   }
 
 def TestParse : [Test] ! = [test]
   Time.Parse("2030-12-25", "%Y-%m-%d", Time.UTC).case {
     .some d => do {
       test
-        .assert("parses the year", d.year == 2030)
-        .assert("parses the month", d.month == 12)
-        .assert("parses the day", d.day == 25)
-        .assert("formats back to the same text", d.format("%Y-%m-%d") == "2030-12-25")
+        .check("parses the year", d.year == 2030)
+        .check("parses the month", d.month == 12)
+        .check("parses the day", d.day == 25)
+        .check("formats back to the same text", d.format("%Y-%m-%d") == "2030-12-25")
     } in !,
-    .none! => do { test.assert("parsing should succeed", .false!) } in !,
+    .none! => do { test.check("parsing should succeed", .false!) } in !,
   }

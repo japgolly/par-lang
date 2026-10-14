@@ -7,19 +7,19 @@ def TestTemplateStrings: [Test] ! = [test] do {
   let age = 30
 
   test
-    .assert(
+    .check(
       "Template strings splice strings and display data",
       `${name} is #{age} years old.` == "Michal is 30 years old.",
     )
-    .assert(
+    .check(
       "Template data interpolation displays nested data",
       `value=#{(1) .true!}` == "value=(1) .true!",
     )
-    .assert(
+    .check(
       "Template strings support template-specific escapes",
       `\` \${ \#{` == "` ${ #{",
     )
-    .assert(
+    .check(
       "Template strings support multiline text",
       `line
 #{.true!}` == "line\n.true!",

@@ -90,7 +90,7 @@ def TestSieve : [Test] ! =
 	[test]
 	do {
 		let primes : List<Nat> = *(2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97)
-		test.assert(
+		test.check(
 			"Sieve finds primes",
 			ListEquals(type Nat, Take(type Nat, Sieve, 25), primes, box [x, y] x == y)
 		)

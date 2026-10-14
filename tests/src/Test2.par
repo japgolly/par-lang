@@ -55,23 +55,23 @@ def ShapeToNat: [Shape] Nat = [s]
   }
 
 def TestBoolLogic: [Test] ! = [test] do {
-  test.assert("Not false is true", Not(.false!).case { .true! => .true!, .false! => .false! })
-  test.assert("Not true is false", Not(.true!).case { .false! => .true!, .true! => .false! })
-  test.assert("True and true is true", And(.true!, .true!).case { .true! => .true!, .false! => .false! })
-  test.assert("True and false is false", And(.true!, .false!).case { .false! => .true!, .true! => .false! })
-  test.assert("False or true is true", Or(.false!, .true!).case { .true! => .true!, .false! => .false! })
+  test.check("Not false is true", Not(.false!).case { .true! => .true!, .false! => .false! })
+  test.check("Not true is false", Not(.true!).case { .false! => .true!, .true! => .false! })
+  test.check("True and true is true", And(.true!, .true!).case { .true! => .true!, .false! => .false! })
+  test.check("True and false is false", And(.true!, .false!).case { .false! => .true!, .true! => .false! })
+  test.check("False or true is true", Or(.false!, .true!).case { .true! => .true!, .false! => .false! })
 } in !
 
 def TestColors: [Test] ! = [test] do {
-  test.assert("Red is 1", ColorToNat(.red!) == 1)
-  test.assert("Green is 2", ColorToNat(.green!) == 2)
-  test.assert("Blue is 3", ColorToNat(.blue!) == 3)
+  test.check("Red is 1", ColorToNat(.red!) == 1)
+  test.check("Green is 2", ColorToNat(.green!) == 2)
+  test.check("Blue is 3", ColorToNat(.blue!) == 3)
 } in !
 
 def TestShapes: [Test] ! = [test] do {
-  test.assert("Circle is 10", ShapeToNat(.circle!) == 10)
-  test.assert("Square is 20", ShapeToNat(.square!) == 20)
-  test.assert("Triangle is 30", ShapeToNat(.triangle!) == 30)
+  test.check("Circle is 10", ShapeToNat(.circle!) == 10)
+  test.check("Square is 20", ShapeToNat(.square!) == 20)
+  test.check("Triangle is 30", ShapeToNat(.triangle!) == 30)
 } in !
 
 def TestCombined: [Test] ! = [test] do {
@@ -79,11 +79,11 @@ def TestCombined: [Test] ! = [test] do {
   let circleValue = ShapeToNat(.circle!)
   let sum = redValue + circleValue
 
-  test.assert("Red + Circle = 11", sum == 11)
+  test.check("Red + Circle = 11", sum == 11)
 
   let greenValue = ColorToNat(.green!)
   let squareValue = ShapeToNat(.square!)
   let sum2 = greenValue + squareValue
 
-  test.assert("Green + Square = 22", sum2 == 22)
+  test.check("Green + Square = 22", sum2 == 22)
 } in !

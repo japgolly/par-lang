@@ -26,9 +26,9 @@ def TestNumberZero: [Test] ! = [test] do {
   let floatZero = Number.Zero(type Float)
 
   test
-    .assert("Number.Zero(type Nat) behaves like nat 0", natZero == 0)
-    .assert("Number.Zero(type Int) behaves like int 0", intZero == 0)
-    .assert(
+    .check("Number.Zero(type Nat) behaves like nat 0", natZero == 0)
+    .check("Number.Zero(type Int) behaves like int 0", intZero == 0)
+    .check(
       "Number.Zero(type Float) behaves like float 0.0",
       floatZero == 0.0,
     )
@@ -42,11 +42,11 @@ def TestGenericNumberOperations: [Test] ! = [test] do {
   let intNegated = Number.Neg(5)
 
   test
-    .assert("Number.Add keeps nat arithmetic", natSum == 5)
-    .assert("Number.Sub infers signed ints", signedDiff == 2)
-    .assert("Number.Mul keeps float arithmetic", floatProduct == 3.0)
-    .assert("Number.Add handles the Zero variant", intSumWithZero == 3)
-    .assert("Number.Neg negates signed inputs", intNegated == -5)
+    .check("Number.Add keeps nat arithmetic", natSum == 5)
+    .check("Number.Sub infers signed ints", signedDiff == 2)
+    .check("Number.Mul keeps float arithmetic", floatProduct == 3.0)
+    .check("Number.Add handles the Zero variant", intSumWithZero == 3)
+    .check("Number.Neg negates signed inputs", intNegated == -5)
 } in !
 
 def TestDataGenericFunctions: [Test] ! = [test]
@@ -56,11 +56,11 @@ def TestDataGenericFunctions: [Test] ! = [test]
   let ordering = Data.Compare((pairData) rightData) in
   do {
     test
-      .assert(
+      .check(
         "Data.ToString renders nested data",
         rendered == "(1) .true!",
       )
-      .assert("Data.Compare compares paired same-type data", IsLess(ordering))
+      .check("Data.Compare compares paired same-type data", IsLess(ordering))
   } in !
 
 type Format = List<either {
@@ -85,7 +85,7 @@ def RenderFormat = [fmt] do {
 
 def TestFormatDropsBranchLocalData: [Test] ! = [test] do {
   let fmt: Format = *(.str "x=", .dat(3)!, .str ", ok=", .dat(.true!)!)
-  test.assert(
+  test.check(
     "Case fallthrough drops branch-local data values",
     RenderFormat(fmt) == "x=3, ok=.true!",
   )

@@ -4,30 +4,17 @@ import @core/Test
 import @core/Bool
 
 
-def Test0: [Test] ! = [test] chan user {
-    test.id[id]
-    id(type either {.true! .false!}, .true!).case {
-        .true => {
-            id?
-        }
-        .false => {
-            id?
-        }
-    }
-    test.done <> user
-}
-
 def Not: [Bool] Bool = [x] x.case {
     .true! => .false!,
     .false! => .true!,
 }
 
-def TestAssertTrue: [Test] ! = [test] chan user {
-    test.assert("Hi", .true!)
-    test.done <> user
+def TestCheckTrue: [Test] ! = [test] chan user {
+    test.check("Hi", .true!)
+    user!
 }
 
 def TestBoolNot: [Test] ! = [test] chan user {
-    test.assert("Hi", Not(.false!))
-    test.done <> user
+    test.check("Hi", Not(.false!))
+    user!
 }

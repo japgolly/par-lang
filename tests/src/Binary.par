@@ -157,12 +157,11 @@ def TestRoundtrip: [Test]! = [test] chan user {
     let range = Nat.Range(0, 32)
     range.begin.case {
         .item (head) => {
-            test.assert("Round-trip did not work", RT(head) == head)
+            test.check("Round-trip did not work", RT(head) == head)
             range.loop
         }
         .end => {}
     }
-    test.done?
     user!
 }
 
@@ -192,6 +191,5 @@ def TestQuicksort: [Test]! = [test] chan user {
     let list = ListMap(type Nat, type BNat, list, box FromNat)
     let list = Quicksort(type BNat, box [a] [b] (a) (b) Cmp(a, b), list)
     let list = ListMap(type BNat, type Nat, list, box ToNat)
-    test.done?
     user!
 }

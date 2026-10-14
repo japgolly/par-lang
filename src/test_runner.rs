@@ -15,7 +15,7 @@ use par_core::{
     },
     runtime::{Compiled, RuntimeCompilerError},
     source::Span,
-    testing::{AssertionResult, provide_test},
+    testing::{CheckResult, provide_test},
     workspace::{CheckedWorkspace, ModulePath, WorkspaceDiscoveryError, WorkspaceError},
 };
 use par_runtime::linker::Linked;
@@ -93,17 +93,14 @@ fn map_workspace_build_error(error: WorkspaceBuildError) -> BuildError {
 #[derive(Debug)]
 pub enum TestStatus {
     Passed,
-    PassedWithNoAssertions,
+    PassedWithNoChecks,
     Failed(String),
-    FailedWithAssertions(Vec<AssertionResult>),
+    FailedWithChecks(Vec<CheckResult>),
 }
 
 impl TestStatus {
     pub fn is_passed(&self) -> bool {
-        matches!(
-            self,
-            TestStatus::Passed | TestStatus::PassedWithNoAssertions
-        )
+        matches!(self, TestStatus::Passed | TestStatus::PassedWithNoChecks)
     }
 }
 
@@ -111,10 +108,10 @@ impl Display for TestStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TestStatus::Passed => write!(f, "passed"),
-            TestStatus::PassedWithNoAssertions => write!(f, "passed with no assertions"),
+            TestStatus::PassedWithNoChecks => write!(f, "passed with no checks"),
             TestStatus::Failed(msg) => write!(f, "failed: {msg}"),
-            TestStatus::FailedWithAssertions(v) => {
-                write!(f, "failed with {} assertion(s)", v.len())
+            TestStatus::FailedWithChecks(v) => {
+                write!(f, "{} check(s) failed", v.len())
             }
         }
     }
@@ -357,7 +354,7 @@ fn run_single_definition(
         );
         handle.continue_();
         fut.await;
-        Ok(TestStatus::PassedWithNoAssertions)
+        Ok(TestStatus::PassedWithNoChecks)
     })
 }
 
@@ -426,14 +423,14 @@ async fn run_test(
     while let Ok(result) = receiver.try_recv() {
         results.push(result);
     }
-    let failed_assertions: Vec<_> = results.iter().filter(|r| !r.passed).cloned().collect();
+    let failed_checks: Vec<_> = results.iter().filter(|r| !r.passed).cloned().collect();
 
-    if failed_assertions.is_empty() && !results.is_empty() {
+    if failed_checks.is_empty() && !results.is_empty() {
         Ok(TestStatus::Passed)
-    } else if !failed_assertions.is_empty() {
-        Ok(TestStatus::FailedWithAssertions(failed_assertions))
+    } else if !failed_checks.is_empty() {
+        Ok(TestStatus::FailedWithChecks(failed_checks))
     } else {
-        Ok(TestStatus::PassedWithNoAssertions)
+        Ok(TestStatus::PassedWithNoChecks)
     }
 }
 
@@ -463,17 +460,17 @@ fn print_test_results(module: &str, results: &[TestResult]) {
             TestStatus::Failed(msg) => {
                 println!("    {}", msg.red());
             }
-            TestStatus::FailedWithAssertions(assertions) => {
-                for a in assertions {
+            TestStatus::FailedWithChecks(checks) => {
+                for a in checks {
                     println!(
                         "    {} {}: {}",
                         FAILED.red(),
                         a.description,
-                        "assertion failed".red()
+                        "check failed".red()
                     );
                 }
             }
-            TestStatus::PassedWithNoAssertions => {}
+            TestStatus::PassedWithNoChecks => {}
             TestStatus::Passed => {}
         }
     }

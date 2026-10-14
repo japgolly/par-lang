@@ -19,14 +19,14 @@ def TestArithmeticOperators: [Test] ! = [test] do {
   let negatedProduct = neg 2 * 3
 
   test
-    .assert("Infix + works on numbers", natSum == 5)
-    .assert("Infix - works on signed numbers", intDiff == 2)
-    .assert("Infix * works on numbers", floatProduct == 3.0)
-    .assert("Infix / works on numbers", natQuotient == 4)
-    .assert("Prefix neg works on signed numbers", negated == -5)
-    .assert("Multiplication binds tighter than addition", precedence == 7)
-    .assert("Grouping still overrides precedence", grouped == 9)
-    .assert("neg binds tighter than multiplication", negatedProduct == -6)
+    .check("Infix + works on numbers", natSum == 5)
+    .check("Infix - works on signed numbers", intDiff == 2)
+    .check("Infix * works on numbers", floatProduct == 3.0)
+    .check("Infix / works on numbers", natQuotient == 4)
+    .check("Prefix neg works on signed numbers", negated == -5)
+    .check("Multiplication binds tighter than addition", precedence == 7)
+    .check("Grouping still overrides precedence", grouped == 9)
+    .check("neg binds tighter than multiplication", negatedProduct == -6)
 } in !
 
 def TestComparisonOperators: [Test] ! = [test] do {
@@ -34,14 +34,14 @@ def TestComparisonOperators: [Test] ! = [test] do {
   let pairRight: (Nat) Nat = (0) 2
 
   test
-    .assert("Infix < works on data", 1 < 2)
-    .assert("Infix > works on data", 2 > 1)
-    .assert("Infix <= works on data", 2 <= 2)
-    .assert("Infix >= works on data", 2 >= 2)
-    .assert("Infix == works on data", pairLeft == (0) 0)
-    .assert("Infix != works on data", pairLeft != pairRight)
-    .assert("Comparison chains work on primitive data", 1 < 2 < 3)
-    .assert(
+    .check("Infix < works on data", 1 < 2)
+    .check("Infix > works on data", 2 > 1)
+    .check("Infix <= works on data", 2 <= 2)
+    .check("Infix >= works on data", 2 >= 2)
+    .check("Infix == works on data", pairLeft == (0) 0)
+    .check("Infix != works on data", pairLeft != pairRight)
+    .check("Comparison chains work on primitive data", 1 < 2 < 3)
+    .check(
       "Comparison chains work with non-primitive middle operands",
       (0) 0 < (0) 1 < (0) 2,
     )
@@ -91,11 +91,11 @@ def TestProcessCompoundAssignments: [Test] ! = [test] do {
   let caseHigh = CompoundAssignCaseBranch(8)
 
   test
-    .assert("Process += works in do blocks", natValue == 2)
-    .assert("Process *= and /= work in do blocks", floatValue == 3.0)
-    .assert("Process += works in chan blocks", chanNat == 5)
-    .assert("Process -= works in chan blocks", chanInt == -2)
-    .assert("Process compound assignment works in case less branches", caseLow == 5)
-    .assert("Process compound assignment works in case equal branches", caseEqual == 10)
-    .assert("Process compound assignment works in case greater branches", caseHigh == 4)
+    .check("Process += works in do blocks", natValue == 2)
+    .check("Process *= and /= work in do blocks", floatValue == 3.0)
+    .check("Process += works in chan blocks", chanNat == 5)
+    .check("Process -= works in chan blocks", chanInt == -2)
+    .check("Process compound assignment works in case less branches", caseLow == 5)
+    .check("Process compound assignment works in case equal branches", caseEqual == 10)
+    .check("Process compound assignment works in case greater branches", caseHigh == 4)
 } in !

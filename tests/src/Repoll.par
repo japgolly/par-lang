@@ -32,5 +32,5 @@ def DrainIf: [List<!>] ! = [list] poll(list) {
 def TestRepollAfterBlock: [Test] ! = [test] do {
   let ! = DrainAfterDo(*(!, !, !))
   let ! = DrainIf(*(!, !, !))
-  test.assert("repoll works after a do block and inside an if branch", .true!)
-} in test.done
+  test.check("repoll works after a do block and inside an if branch", .true!)
+} in !

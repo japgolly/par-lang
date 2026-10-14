@@ -16,5 +16,5 @@ def SimpleFactorial: [Nat] Nat = [n]
   }
 
 def TestFactorial: [Test] ! = [test] do {
-  test.assert("Factorial of 5 is 120", SimpleFactorial(5) == 120)
+  test.check("Factorial of 5 is 120", SimpleFactorial(5) == 120)
 } in !

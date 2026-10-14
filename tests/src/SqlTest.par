@@ -40,7 +40,7 @@ def AttemptBadTx = [tx]
 // Round-trip: create, parameterized insert, query stream, typed decode.
 def TestRoundTrip: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`round-trip should not error: ${e}`, .false!)
+    test.check(`round-trip should not error: ${e}`, .false!)
     done!
   }
 
@@ -59,18 +59,18 @@ def TestRoundTrip: [Test] ! = [test] chan done {
   all.case {
     .item(row) _ => {
       UserLine(row).case {
-        .ok line => { test.assert("round-trips Alice/30", line == "Alice is 30"); done! },
-        .err e => { test.assert(`decode failed: ${e}`, .false!); done! },
+        .ok line => { test.check("round-trips Alice/30", line == "Alice is 30"); done! },
+        .err e => { test.check(`decode failed: ${e}`, .false!); done! },
       }
     },
-    .end! => { test.assert("expected exactly one row", .false!); done! },
+    .end! => { test.check("expected exactly one row", .false!); done! },
   }
 }
 
 // Execute reports affected rows; query returns all inserted rows.
 def TestExecuteAffected: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`execute should not error: ${e}`, .false!)
+    test.check(`execute should not error: ${e}`, .false!)
     done!
   }
 
@@ -87,15 +87,15 @@ def TestExecuteAffected: [Test] ! = [test] chan done {
   db.close
 
   let count = all->List.Length
-  test.assert("insert reports three affected rows", affected == 3)
-  test.assert("three rows returned", count == 3)
+  test.check("insert reports three affected rows", affected == 3)
+  test.check("three rows returned", count == 3)
   done!
 }
 
 // SQL NULL decodes to `.none!` via Nullable; a missing column errors.
 def TestNullableAndMissing: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`null test should not error: ${e}`, .false!)
+    test.check(`null test should not error: ${e}`, .false!)
     done!
   }
 
@@ -120,18 +120,18 @@ def TestNullableAndMissing: [Test] ! = [test] chan done {
         .err _ => .false!,
       }
       let missingErrored = missing.case { .ok _ => .false!, .err _ => .true! }
-      test.assert("present SQL NULL decodes to none", nickIsNone)
-      test.assert("missing column errors", missingErrored)
+      test.check("present SQL NULL decodes to none", nickIsNone)
+      test.check("missing column errors", missingErrored)
       done!
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
 // A committed transaction is durable.
 def TestTransactionCommit: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`commit should not error: ${e}`, .false!)
+    test.check(`commit should not error: ${e}`, .false!)
     done!
   }
 
@@ -156,22 +156,22 @@ def TestTransactionCommit: [Test] ! = [test] chan done {
   let try@db all = Stream.ToList(rows)
   db.close
 
-  test.assert("two accounts remain", all->List.Length == 2)
+  test.check("two accounts remain", all->List.Length == 2)
   all.case {
     .item(row) _ => {
       IntField(row, "balance").case {
-        .ok bal => { test.assert("committed transfer leaves sender at 50", bal == 50); done! },
-        .err e => { test.assert(`decode failed: ${e}`, .false!); done! },
+        .ok bal => { test.check("committed transfer leaves sender at 50", bal == 50); done! },
+        .err e => { test.check(`decode failed: ${e}`, .false!); done! },
       }
     },
-    .end! => { test.assert("expected account rows", .false!); done! },
+    .end! => { test.check("expected account rows", .false!); done! },
   }
 }
 
 // A statement failure inside a transaction rolls back the whole transaction.
 def TestTransactionRollback: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`setup should not error: ${e}`, .false!)
+    test.check(`setup should not error: ${e}`, .false!)
     done!
   }
 
@@ -189,7 +189,7 @@ def TestTransactionRollback: [Test] ! = [test] chan done {
       db.query("SELECT v FROM t WHERE id = 1", *())[try@db rows]
       let try@db all = Stream.ToList(rows)
       db.close
-      test.assert("conflicting transaction should have failed", .false!)
+      test.check("conflicting transaction should have failed", .false!)
       done!
     },
     .err _ => {
@@ -199,11 +199,11 @@ def TestTransactionRollback: [Test] ! = [test] chan done {
       all.case {
         .item(row) _ => {
           IntField(row, "v").case {
-            .ok v => { test.assert("rolled-back update leaves v = 10", v == 10); done! },
-            .err e => { test.assert(`decode failed: ${e}`, .false!); done! },
+            .ok v => { test.check("rolled-back update leaves v = 10", v == 10); done! },
+            .err e => { test.check(`decode failed: ${e}`, .false!); done! },
           }
         },
-        .end! => { test.assert("row should still exist", .false!); done! },
+        .end! => { test.check("row should still exist", .false!); done! },
       }
     },
   }
@@ -212,7 +212,7 @@ def TestTransactionRollback: [Test] ! = [test] chan done {
 // A query against a missing table fails at startup, in the outer `Try`.
 def TestQueryStartupError: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`setup should not error: ${e}`, .false!)
+    test.check(`setup should not error: ${e}`, .false!)
     done!
   }
 
@@ -222,10 +222,10 @@ def TestQueryStartupError: [Test] ! = [test] chan done {
   db.close
 
   result.case {
-    .err _ => { test.assert("query on a missing table fails at startup", .true!); done! },
+    .err _ => { test.check("query on a missing table fails at startup", .true!); done! },
     .ok stream => {
       stream.close
-      test.assert("query on a missing table should have failed", .false!)
+      test.check("query on a missing table should have failed", .false!)
       done!
     },
   }
@@ -235,7 +235,7 @@ def TestQueryStartupError: [Test] ! = [test] chan done {
 // through a sibling handle.
 def TestSplit: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`split test should not error: ${e}`, .false!)
+    test.check(`split test should not error: ${e}`, .false!)
     done!
   }
 
@@ -255,18 +255,18 @@ def TestSplit: [Test] ! = [test] chan done {
   all.case {
     .item(row) _ => {
       IntField(row, "n").case {
-        .ok n => { test.assert("a sibling pool handle sees the same data", n == 42); done! },
-        .err e => { test.assert(`decode failed: ${e}`, .false!); done! },
+        .ok n => { test.check("a sibling pool handle sees the same data", n == 42); done! },
+        .err e => { test.check(`decode failed: ${e}`, .false!); done! },
       }
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
 // Each supported column type decodes to the faithful `Value` variant.
 def TestColumnTypes: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`column-type test should not error: ${e}`, .false!)
+    test.check(`column-type test should not error: ${e}`, .false!)
     done!
   }
 
@@ -304,21 +304,21 @@ def TestColumnTypes: [Test] ! = [test] chan done {
         .ok option => option.case { .none! => .true!, .some _ => .false! },
         .err _ => .false!,
       }
-      test.assert("integer column decodes to .int", intOk)
-      test.assert("real column decodes to .float", floatOk)
-      test.assert("text column decodes to .text", textOk)
-      test.assert("blob column decodes to .bytes", bytesOk)
-      test.assert("null column decodes to none", nullOk)
+      test.check("integer column decodes to .int", intOk)
+      test.check("real column decodes to .float", floatOk)
+      test.check("text column decodes to .text", textOk)
+      test.check("blob column decodes to .bytes", bytesOk)
+      test.check("null column decodes to none", nullOk)
       done!
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
 // `Timestamp` / `AsTimestamp` round-trip an instant through RFC 3339 text.
 def TestTimestampRoundTrip: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`timestamp test should not error: ${e}`, .false!)
+    test.check(`timestamp test should not error: ${e}`, .false!)
     done!
   }
 
@@ -340,18 +340,18 @@ def TestTimestampRoundTrip: [Test] ! = [test] chan done {
     .item(row) _ => {
       let decoded = row->Sql.Field("at")->Sql.Decode(Sql.AsTimestamp)
       decoded.case {
-        .ok back => { test.assert("timestamp round-trips", Time.Compare(back, instant) is .equal!); done! },
-        .err e => { test.assert(`timestamp decode failed: ${e}`, .false!); done! },
+        .ok back => { test.check("timestamp round-trips", Time.Compare(back, instant) is .equal!); done! },
+        .err e => { test.check(`timestamp decode failed: ${e}`, .false!); done! },
       }
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
 // `DateTime` / `Date` round-trip civil values through fixed-layout ISO text.
 def TestCivilRoundTrip: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`civil test should not error: ${e}`, .false!)
+    test.check(`civil test should not error: ${e}`, .false!)
     done!
   }
 
@@ -384,11 +384,11 @@ def TestCivilRoundTrip: [Test] ! = [test] chan done {
         .ok z => z.format("%Y-%m-%d") == "2024-07-01",
         .err _ => .false!,
       }
-      test.assert("datetime round-trips at second precision", datetimeOk)
-      test.assert("date round-trips", dateOk)
+      test.check("datetime round-trips at second precision", datetimeOk)
+      test.check("date round-trips", dateOk)
       done!
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
@@ -397,10 +397,10 @@ def TestOpenError: [Test] ! = [test]
   Sql.Open("nonsense://localhost/db").case {
     .ok db => do {
       db.close
-      test.assert("an unsupported URL scheme should fail to open", .false!)
+      test.check("an unsupported URL scheme should fail to open", .false!)
     } in !,
     .err _ => do {
-      test.assert("an unsupported URL scheme fails to open", .true!)
+      test.check("an unsupported URL scheme fails to open", .true!)
     } in !,
   }
 
@@ -408,7 +408,7 @@ def TestOpenError: [Test] ! = [test]
 // as `.bool` and a plain 0/1 integer.
 def TestBoolRoundTrip: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`bool test should not error: ${e}`, .false!)
+    test.check(`bool test should not error: ${e}`, .false!)
     done!
   }
 
@@ -436,14 +436,14 @@ def TestBoolRoundTrip: [Test] ! = [test] chan done {
             .ok b => b.case { .true! => .false!, .false! => .true! },
             .err _ => .false!,
           }
-          test.assert("a written .bool true reads back as true", trueOk)
-          test.assert("an integer 0 reads back as false", falseOk)
+          test.check("a written .bool true reads back as true", trueOk)
+          test.check("an integer 0 reads back as false", falseOk)
           done!
         },
-        .end! => { test.assert("expected two rows", .false!); done! },
+        .end! => { test.check("expected two rows", .false!); done! },
       }
     },
-    .end! => { test.assert("expected rows", .false!); done! },
+    .end! => { test.check("expected rows", .false!); done! },
   }
 }
 
@@ -452,7 +452,7 @@ def TestBoolRoundTrip: [Test] ! = [test] chan done {
 // the PostgreSQL cast form parses as a timestamp.
 def TestSqlWrittenTemporals: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`temporal test should not error: ${e}`, .false!)
+    test.check(`temporal test should not error: ${e}`, .false!)
     done!
   }
 
@@ -491,13 +491,13 @@ def TestSqlWrittenTemporals: [Test] ! = [test] chan done {
         .ok i => Time.Compare(i, expected) is .equal!,
         .err _ => .false!,
       }
-      test.assert("datetime('now') text decodes as a date-time", atOk)
-      test.assert("date('now') text decodes as a date", dayOk)
-      test.assert("fractional-second text decodes", fracOk)
-      test.assert("space-separated zone-aware text decodes as a timestamp", stampOk)
+      test.check("datetime('now') text decodes as a date-time", atOk)
+      test.check("date('now') text decodes as a date", dayOk)
+      test.check("fractional-second text decodes", fracOk)
+      test.check("space-separated zone-aware text decodes as a timestamp", stampOk)
       done!
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
@@ -506,7 +506,7 @@ def TestSqlWrittenTemporals: [Test] ! = [test] chan done {
 // would make the follow-up statement fail.
 def TestCloseMidStream: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`close test should not error: ${e}`, .false!)
+    test.check(`close test should not error: ${e}`, .false!)
     done!
   }
 
@@ -520,7 +520,7 @@ def TestCloseMidStream: [Test] ! = [test] chan done {
   rows.begin.next.case {
     .end _ => {
       db.close
-      test.assert("expected rows before closing", .false!)
+      test.check("expected rows before closing", .false!)
       done!
     },
     .item(row) rows => {
@@ -528,8 +528,8 @@ def TestCloseMidStream: [Test] ! = [test] chan done {
       rows.close
       db.execute("INSERT INTO nums (n) VALUES (4)", *())[try@db inserted]
       db.close
-      test.assert("first row read before close", firstOk)
-      test.assert("statement after close succeeds", inserted == 1)
+      test.check("first row read before close", firstOk)
+      test.check("statement after close succeeds", inserted == 1)
       done!
     },
   }
@@ -539,7 +539,7 @@ def TestCloseMidStream: [Test] ! = [test] chan done {
 // can normalize only if the SQL external accepts and completes `#close`.
 def TestAutomaticCloseMidStream: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`automatic close test should not error: ${e}`, .false!)
+    test.check(`automatic close test should not error: ${e}`, .false!)
     done!
   }
 
@@ -553,13 +553,13 @@ def TestAutomaticCloseMidStream: [Test] ! = [test] chan done {
   rows.begin.next.case {
     .end _ => {
       db.close
-      test.assert("expected rows before automatic close", .false!)
+      test.check("expected rows before automatic close", .false!)
       done!
     },
     .item(row) rows => {
       let firstOk = IntField(row, "n").case { .ok n => n == 1, .err _ => .false! }
       db.close
-      test.assert("first row read before automatic close", firstOk)
+      test.check("first row read before automatic close", firstOk)
       done!
     },
   }
@@ -569,7 +569,7 @@ def TestAutomaticCloseMidStream: [Test] ! = [test] chan done {
 // normalize only if the SQL external accepts and completes `#close`.
 def TestAutomaticTransactionRollback: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`automatic rollback test should not error: ${e}`, .false!)
+    test.check(`automatic rollback test should not error: ${e}`, .false!)
     done!
   }
 
@@ -582,7 +582,7 @@ def TestAutomaticTransactionRollback: [Test] ! = [test] chan done {
   tx.execute("UPDATE auto_tx SET v = 20 WHERE id = 1", *()).try@db[_]
 
   db.close
-  test.assert("SQL transactions accept automatic rollback", .true!)
+  test.check("SQL transactions accept automatic rollback", .true!)
   done!
 }
 
@@ -590,7 +590,7 @@ def TestAutomaticTransactionRollback: [Test] ! = [test] chan done {
 // results are never inspected.
 def TestExecuteOrdering: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`ordering test should not error: ${e}`, .false!)
+    test.check(`ordering test should not error: ${e}`, .false!)
     done!
   }
 
@@ -607,11 +607,11 @@ def TestExecuteOrdering: [Test] ! = [test] chan done {
   all.case {
     .item(row) _ => {
       IntField(row, "n").case {
-        .ok n => { test.assert("uninspected statements ran in order", n == 2); done! },
-        .err e => { test.assert(`decode failed: ${e}`, .false!); done! },
+        .ok n => { test.check("uninspected statements ran in order", n == 2); done! },
+        .err e => { test.check(`decode failed: ${e}`, .false!); done! },
       }
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }
 
@@ -619,7 +619,7 @@ def TestExecuteOrdering: [Test] ! = [test] chan done {
 // of panicking or truncating.
 def TestIntOutOfRange: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`out-of-range test should not error: ${e}`, .false!)
+    test.check(`out-of-range test should not error: ${e}`, .false!)
     done!
   }
 
@@ -631,15 +631,15 @@ def TestIntOutOfRange: [Test] ! = [test] chan done {
   db.close
 
   result.case {
-    .ok _ => { test.assert("out-of-range integer should fail to bind", .false!); done! },
-    .err _ => { test.assert("out-of-range integer fails to bind", .true!); done! },
+    .ok _ => { test.check("out-of-range integer should fail to bind", .false!); done! },
+    .err _ => { test.check("out-of-range integer fails to bind", .true!); done! },
   }
 }
 
 // Rows keep duplicate column names; `Field` returns the first match.
 def TestDuplicateColumns: [Test] ! = [test] chan done {
   catch e: Sql.Error => {
-    test.assert(`duplicate-column test should not error: ${e}`, .false!)
+    test.check(`duplicate-column test should not error: ${e}`, .false!)
     done!
   }
 
@@ -654,10 +654,10 @@ def TestDuplicateColumns: [Test] ! = [test] chan done {
     .item(row) _ => {
       let len = row->List.Length
       let firstOk = IntField(row, "x").case { .ok n => n == 1, .err _ => .false! }
-      test.assert("both duplicate columns are present", len == 2)
-      test.assert("Field returns the first duplicate", firstOk)
+      test.check("both duplicate columns are present", len == 2)
+      test.check("Field returns the first duplicate", firstOk)
       done!
     },
-    .end! => { test.assert("expected a row", .false!); done! },
+    .end! => { test.check("expected a row", .false!); done! },
   }
 }

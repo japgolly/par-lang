@@ -44,7 +44,7 @@ def TestMapAndSum: [Test] ! = [test] do {
   let doubled = MapNat(box Double, original)
   let sum = SumList(doubled)
 
-  test.assert("Sum of doubled [1,2,3] is 12", sum == 12)
+  test.check("Sum of doubled [1,2,3] is 12", sum == 12)
 } in !
 
 def TestFilterAndSum: [Test] ! = [test] do {
@@ -52,7 +52,7 @@ def TestFilterAndSum: [Test] ! = [test] do {
   let evens = FilterNat(box IsEven, original)
   let sum = SumList(evens)
 
-  test.assert("Sum of evens from [1,2,3,4,5] is 6", sum == 6)
+  test.check("Sum of evens from [1,2,3,4,5] is 6", sum == 6)
 } in !
 
 def TestChaining: [Test] ! = [test] do {
@@ -61,5 +61,5 @@ def TestChaining: [Test] ! = [test] do {
   let evens = FilterNat(box IsEven, doubled)
   let sum = SumList(evens)
 
-  test.assert("Double then filter evens from [1,2,3,4] sums to 20", sum == 20)
+  test.check("Double then filter evens from [1,2,3,4] sums to 20", sum == 20)
 } in !

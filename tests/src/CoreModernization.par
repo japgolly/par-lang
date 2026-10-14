@@ -50,8 +50,8 @@ def ZeroAsNat = [n] chan result {
 
 def TestGroupedCommandSubject : [Test] ! = [test] do {
   test
-    .assert("A grouped comparison can be a temporary command subject", ZeroAsNat(0) == 1)
-    .assert("A temporary command subject is evaluated for the other branch", ZeroAsNat(4) == 0)
+    .check("A grouped comparison can be a temporary command subject", ZeroAsNat(0) == 1)
+    .check("A temporary command subject is evaluated for the other branch", ZeroAsNat(4) == 0)
 } in !
 
 dec MapLookupThenList : [Map<Key, String>, Key] (Option<String>) PairList
@@ -100,25 +100,25 @@ def TestListConstraintsAndEquality : [Test] ! = [test] do {
   let empty: List<Nat> = *()
 
   test
-    .assert("List equality uses generic data equality", values == {*(1, 2, 3, 4)})
-    .assert("List.Filter accepts a box-constrained element type", evens == {*(2, 4)})
-    .assert("List.FilterMap keeps present mapped values", doubledEvens == {*(4, 8)})
-    .assert("List.Length accepts a box-constrained element type", values->List.Length == 4)
-    .assert("List.Zip accepts box-constrained element types", zipped == {*((1) "one", (2) "two")})
-    .assert("List.All accepts a box-constrained element type", values->List.All(box [n] n > 0))
-    .assert("List.Any accepts a box-constrained element type", values->List.Any(box [n] n == 3))
-    .assert("List.Take accepts a box-constrained element type", firstTwo == {*(1, 2)})
-    .assert("List.Drop accepts a box-constrained element type", withoutTwo == {*(3, 4)})
-    .assert("List.TakeWhile keeps the matching prefix", takeUnderThree == *(1, 2))
-    .assert("List.DropWhile skips the matching prefix", dropUnderThree == *(3, 4))
-    .assert("List.Min returns the smallest element", values->List.Min is .some n and n == 1)
-    .assert("List.Max returns the largest element", values->List.Max is .some n and n == 4)
-    .assert("List.Min returns none for an empty list", empty->List.Min is .none!)
-    .assert("List.Reverse reverses list order", reversed == *(4, 3, 2, 1))
-    .assert("List.Find returns the first matching element", found is .some n and n == 3)
-    .assert("List.Enumerate pairs values with indices", enumerated == *((0) 1, (1) 2, (2) 3, (3) 4))
-    .assert("List.ForEach works in expression syntax", sum == 10)
-    .assert("List.ForEach works in process syntax", doubled == *(2, 4, 6, 8))
+    .check("List equality uses generic data equality", values == {*(1, 2, 3, 4)})
+    .check("List.Filter accepts a box-constrained element type", evens == {*(2, 4)})
+    .check("List.FilterMap keeps present mapped values", doubledEvens == {*(4, 8)})
+    .check("List.Length accepts a box-constrained element type", values->List.Length == 4)
+    .check("List.Zip accepts box-constrained element types", zipped == {*((1) "one", (2) "two")})
+    .check("List.All accepts a box-constrained element type", values->List.All(box [n] n > 0))
+    .check("List.Any accepts a box-constrained element type", values->List.Any(box [n] n == 3))
+    .check("List.Take accepts a box-constrained element type", firstTwo == {*(1, 2)})
+    .check("List.Drop accepts a box-constrained element type", withoutTwo == {*(3, 4)})
+    .check("List.TakeWhile keeps the matching prefix", takeUnderThree == *(1, 2))
+    .check("List.DropWhile skips the matching prefix", dropUnderThree == *(3, 4))
+    .check("List.Min returns the smallest element", values->List.Min is .some n and n == 1)
+    .check("List.Max returns the largest element", values->List.Max is .some n and n == 4)
+    .check("List.Min returns none for an empty list", empty->List.Min is .none!)
+    .check("List.Reverse reverses list order", reversed == *(4, 3, 2, 1))
+    .check("List.Find returns the first matching element", found is .some n and n == 3)
+    .check("List.Enumerate pairs values with indices", enumerated == *((0) 1, (1) 2, (2) 3, (3) 4))
+    .check("List.ForEach works in expression syntax", sum == 10)
+    .check("List.ForEach works in process syntax", doubled == *(2, 4, 6, 8))
 } in !
 
 def TestListSorting : [Test] ! = [test] do {
@@ -135,17 +135,17 @@ def TestListSorting : [Test] ! = [test] do {
   )
 
   test
-    .assert("List.Sort orders data ascending", numbers->List.Sort == *(1, 1, 2, 3))
-    .assert("List.SortDesc orders data descending", numbers->List.SortDesc == *(3, 2, 1, 1))
-    .assert(
+    .check("List.Sort orders data ascending", numbers->List.Sort == *(1, 1, 2, 3))
+    .check("List.SortDesc orders data descending", numbers->List.SortDesc == *(3, 2, 1, 1))
+    .check(
       "List.SortBy is stable for equal keys",
       sortedTagged == {*((0) "zero", (1) "one", (2) "first-two", (2) "second-two")},
     )
-    .assert(
+    .check(
       "List.SortLinearBy sorts by returned keys",
       linearSortedTagged == {*((0) "zero", (1) "one", (2) "first-two", (2) "second-two")},
     )
-    .assert(
+    .check(
       "List.SortLinearDescBy sorts by returned keys descending",
       linearDescTagged == {*((2) "first-two", (2) "second-two", (1) "one", (0) "zero")},
     )
@@ -202,17 +202,17 @@ def TestStreamCombinators : [Test] ! = [test] do {
   )
 
   test
-    .assert("Stream.Map and Stream.Filter compose", transformed == *(6, 8))
-    .assert("Stream.Take limits a stream", firstTwo == {*(1, 2)})
-    .assert("Stream.Take(0) yields no items", firstNone == {*()})
-    .assert("Stream.Drop skips a prefix", withoutTwo == {*(3, 4)})
-    .assert("Stream.Enumerate pairs values with indices", enumerated == *((0) 1, (1) 2, (2) 3, (3) 4))
-    .assert("Stream.TakeWhile keeps the matching prefix", takeUnderThree == *(1, 2))
-    .assert("Stream.DropWhile skips the matching prefix", dropUnderThree == *(3, 4))
-    .assert("Stream.ForEach folds while preserving status", status is .ok! and total == 10)
-    .assert("Stream.All checks every item", numbers->Stream.FromList->Stream.All(box [n] n > 0)->Try.Ok)
-    .assert("Stream.Any short-circuits on a match", numbers->Stream.FromList->Stream.Any(box [n] n == 3)->Try.Ok)
-    .assert("Stream.Sum adds numeric items", numbers->Stream.FromList->Stream.Sum->Try.Ok == 10)
+    .check("Stream.Map and Stream.Filter compose", transformed == *(6, 8))
+    .check("Stream.Take limits a stream", firstTwo == {*(1, 2)})
+    .check("Stream.Take(0) yields no items", firstNone == {*()})
+    .check("Stream.Drop skips a prefix", withoutTwo == {*(3, 4)})
+    .check("Stream.Enumerate pairs values with indices", enumerated == *((0) 1, (1) 2, (2) 3, (3) 4))
+    .check("Stream.TakeWhile keeps the matching prefix", takeUnderThree == *(1, 2))
+    .check("Stream.DropWhile skips the matching prefix", dropUnderThree == *(3, 4))
+    .check("Stream.ForEach folds while preserving status", status is .ok! and total == 10)
+    .check("Stream.All checks every item", numbers->Stream.FromList->Stream.All(box [n] n > 0)->Try.Ok)
+    .check("Stream.Any short-circuits on a match", numbers->Stream.FromList->Stream.Any(box [n] n == 3)->Try.Ok)
+    .check("Stream.Sum adds numeric items", numbers->Stream.FromList->Stream.Sum->Try.Ok == 10)
 } in !
 
 def TestStreamFlattening : [Test] ! = [test] do {
@@ -243,9 +243,9 @@ def TestStreamFlattening : [Test] ! = [test] do {
     ->RecoverNatStream
 
   test
-    .assert("Stream.Concat joins a list of streams", concatenated == *(1, 2, 3, 4, 5))
-    .assert("Stream.FlatMap maps and flattens streams", flatMapped == *(1, 10, 2, 20, 3, 30))
-    .assert("Stream.Flatten joins a stream of streams", flattened == *(6, 7, 8))
+    .check("Stream.Concat joins a list of streams", concatenated == *(1, 2, 3, 4, 5))
+    .check("Stream.FlatMap maps and flattens streams", flatMapped == *(1, 10, 2, 20, 3, 30))
+    .check("Stream.Flatten joins a stream of streams", flattened == *(6, 7, 8))
 } in !
 
 def TestStreamSplitting : [Test] ! = [test] do {
@@ -275,12 +275,12 @@ def TestStreamSplitting : [Test] ! = [test] do {
     ->Try.Ok
 
   test
-    .assert("String.Lines returns a stream of lines", lines == *("alpha", "beta", "gamma"))
-    .assert("String.Lines accepts Windows line separators", windowsLines == {*("alpha", "beta", "gamma")})
-    .assert("String.SplitBy splits by string separators", stringParts == *("red", "green", "blue"))
-    .assert("String.Remainder returns unparsed input", remainder == "remaining")
-    .assert("Bytes.Remainder returns unparsed input", String.FromBytes(bytesRemainder) == "bytes")
-    .assert("Bytes.SplitBy splits byte streams", bytesParts == *("a", "b", "c"))
+    .check("String.Lines returns a stream of lines", lines == *("alpha", "beta", "gamma"))
+    .check("String.Lines accepts Windows line separators", windowsLines == {*("alpha", "beta", "gamma")})
+    .check("String.SplitBy splits by string separators", stringParts == *("red", "green", "blue"))
+    .check("String.Remainder returns unparsed input", remainder == "remaining")
+    .check("Bytes.Remainder returns unparsed input", String.FromBytes(bytesRemainder) == "bytes")
+    .check("Bytes.SplitBy splits byte streams", bytesParts == *("a", "b", "c"))
 } in !
 
 def TestTextCasingAndTrimming : [Test] ! = [test] do {
@@ -294,41 +294,41 @@ def TestTextCasingAndTrimming : [Test] ! = [test] do {
   let splitBytes = Bytes.FindAndSplit("abc123xyz", .repeat1.one.range(<<48>>, <<57>>)!)
 
   test
-    .assert("Char.ToLower lowercases a character", Char.ToLower("A") == "a")
-    .assert("Char.ToUpper uppercases a character", Char.ToUpper("z") == "Z")
-    .assert("Char.FromCode builds valid characters", Char.FromCode(65) == "A")
-    .assert("Char.FromCode replaces invalid code points", Char.Code(Char.FromCode(1_114_112)) == 65_533)
-    .assert("Byte.FromCode wraps modulo 256", Byte.Code(Byte.FromCode(300)) == 44)
-    .assert("String.ToLower lowercases a string", String.ToLower("Hello WORLD") == "hello world")
-    .assert("String.ToUpper uppercases a string", String.ToUpper("Hello world") == "HELLO WORLD")
-    .assert("String.Chars splits into characters", String.Chars("Par") == {*("P", "a", "r")})
-    .assert("String.Trim trims surrounding whitespace", String.Trim(" \tHello\n") == "Hello")
-    .assert("String.TrimLeft trims one leading pattern", String.TrimLeft("::value::", .str "::") == "value::")
-    .assert("String.TrimLeft keeps strings without the pattern", String.TrimLeft("value::", .str "::") == "value::")
-    .assert("String.TrimRight trims one trailing pattern", String.TrimRight("::value::", .str "::") == "::value")
-    .assert("String.StartsWith matches a prefix pattern", String.StartsWith("hello", .str "he"))
-    .assert("String.EndsWith matches a suffix pattern", String.EndsWith("hello", .str "lo"))
-    .assert("String.Find returns the matched text", String.Find("abc123", .repeat1.one.ascii.digit!) is .some found and found == "123")
-    .assert(
+    .check("Char.ToLower lowercases a character", Char.ToLower("A") == "a")
+    .check("Char.ToUpper uppercases a character", Char.ToUpper("z") == "Z")
+    .check("Char.FromCode builds valid characters", Char.FromCode(65) == "A")
+    .check("Char.FromCode replaces invalid code points", Char.Code(Char.FromCode(1_114_112)) == 65_533)
+    .check("Byte.FromCode wraps modulo 256", Byte.Code(Byte.FromCode(300)) == 44)
+    .check("String.ToLower lowercases a string", String.ToLower("Hello WORLD") == "hello world")
+    .check("String.ToUpper uppercases a string", String.ToUpper("Hello world") == "HELLO WORLD")
+    .check("String.Chars splits into characters", String.Chars("Par") == {*("P", "a", "r")})
+    .check("String.Trim trims surrounding whitespace", String.Trim(" \tHello\n") == "Hello")
+    .check("String.TrimLeft trims one leading pattern", String.TrimLeft("::value::", .str "::") == "value::")
+    .check("String.TrimLeft keeps strings without the pattern", String.TrimLeft("value::", .str "::") == "value::")
+    .check("String.TrimRight trims one trailing pattern", String.TrimRight("::value::", .str "::") == "::value")
+    .check("String.StartsWith matches a prefix pattern", String.StartsWith("hello", .str "he"))
+    .check("String.EndsWith matches a suffix pattern", String.EndsWith("hello", .str "lo"))
+    .check("String.Find returns the matched text", String.Find("abc123", .repeat1.one.ascii.digit!) is .some found and found == "123")
+    .check(
       "String.FindAndSplit returns context around the match",
       splitString is .some(before, found, after)! and before == "abc" and found == "123" and after == "xyz",
     )
-    .assert("String.Replace replaces literal matches", String.Replace("red blue red", "red", "green") == "green blue green")
-    .assert("String.ReplacePattern transforms pattern matches", replacedNumbers == "a[12]b[345]")
-    .assert("Bytes.TrimLeft trims one leading pattern", String.FromBytes(Bytes.TrimLeft("--data--", .bytes "--")) == "data--")
-    .assert("Bytes.TrimRight trims one trailing pattern", String.FromBytes(Bytes.TrimRight("--data--", .bytes "--")) == "--data")
-    .assert("Bytes.StartsWith matches a prefix pattern", Bytes.StartsWith("hello", .bytes "he"))
-    .assert("Bytes.EndsWith matches a suffix pattern", Bytes.EndsWith("hello", .bytes "lo"))
-    .assert("Bytes.Find returns the matched bytes", Bytes.Find("abc123", .bytes "123") is .some found and String.FromBytes(found) == "123")
-    .assert(
+    .check("String.Replace replaces literal matches", String.Replace("red blue red", "red", "green") == "green blue green")
+    .check("String.ReplacePattern transforms pattern matches", replacedNumbers == "a[12]b[345]")
+    .check("Bytes.TrimLeft trims one leading pattern", String.FromBytes(Bytes.TrimLeft("--data--", .bytes "--")) == "data--")
+    .check("Bytes.TrimRight trims one trailing pattern", String.FromBytes(Bytes.TrimRight("--data--", .bytes "--")) == "--data")
+    .check("Bytes.StartsWith matches a prefix pattern", Bytes.StartsWith("hello", .bytes "he"))
+    .check("Bytes.EndsWith matches a suffix pattern", Bytes.EndsWith("hello", .bytes "lo"))
+    .check("Bytes.Find returns the matched bytes", Bytes.Find("abc123", .bytes "123") is .some found and String.FromBytes(found) == "123")
+    .check(
       "Bytes.FindAndSplit returns context around the match",
       splitBytes is .some(before, found, after)!
         and String.FromBytes(before) == "abc"
         and String.FromBytes(found) == "123"
         and String.FromBytes(after) == "xyz",
     )
-    .assert("Bytes.Replace replaces literal matches", String.FromBytes(Bytes.Replace("red blue red", "red", "green")) == "green blue green")
-    .assert("Bytes.ReplacePattern transforms pattern matches", String.FromBytes(replacedByteNumbers) == "a[12]b[345]")
+    .check("Bytes.Replace replaces literal matches", String.FromBytes(Bytes.Replace("red blue red", "red", "green")) == "green blue green")
+    .check("Bytes.ReplacePattern transforms pattern matches", String.FromBytes(replacedByteNumbers) == "a[12]b[345]")
 } in !
 
 def TestMapConstructors : [Test] ! = [test] do {
@@ -340,10 +340,10 @@ def TestMapConstructors : [Test] ! = [test] do {
   let (emptySize) emptyEntries = MapSizeThenList(empty)
 
   test
-    .assert("Map.FromList keeps the last duplicate key", entry is .some value and value == "new")
-    .assert("Map.FromList lists entries in data-key order", entries == *((KeyB) "zero"))
-    .assert("Map.New starts empty", emptySize == 0 and emptyEntries == *())
-    .assert("Map.entry can insert into a new map", MapPutList(!) == *((KeyA) "one"))
+    .check("Map.FromList keeps the last duplicate key", entry is .some value and value == "new")
+    .check("Map.FromList lists entries in data-key order", entries == *((KeyB) "zero"))
+    .check("Map.New starts empty", emptySize == 0 and emptyEntries == *())
+    .check("Map.entry can insert into a new map", MapPutList(!) == *((KeyA) "one"))
 } in !
 
 def TestBoxMapConstructors : [Test] ! = [test] do {
@@ -354,22 +354,22 @@ def TestBoxMapConstructors : [Test] ! = [test] do {
   let deleted = inserted.delete(KeyB)
 
   test
-    .assert("BoxMap.FromList keeps the last duplicate key", map.get(KeyA) is .some value and value == "new")
-    .assert("BoxMap.FromList exposes plain values from get", map.get(KeyB) is .some value and value == "zero")
-    .assert("BoxMap.FromList lists entries in data-key order", map.list == *((KeyB) "zero", (KeyA) "new"))
-    .assert("BoxMap.New starts empty", empty.size == 0 and empty.list == *())
-    .assert("BoxMap.put returns an updated map", inserted.get(KeyC) is .some value and value == "two")
-    .assert("BoxMap.delete returns an updated map", deleted.get(KeyB) is .none!)
+    .check("BoxMap.FromList keeps the last duplicate key", map.get(KeyA) is .some value and value == "new")
+    .check("BoxMap.FromList exposes plain values from get", map.get(KeyB) is .some value and value == "zero")
+    .check("BoxMap.FromList lists entries in data-key order", map.list == *((KeyB) "zero", (KeyA) "new"))
+    .check("BoxMap.New starts empty", empty.size == 0 and empty.list == *())
+    .check("BoxMap.put returns an updated map", inserted.get(KeyC) is .some value and value == "two")
+    .check("BoxMap.delete returns an updated map", deleted.get(KeyB) is .none!)
 } in !
 
 def TestNumberParsingOptions : [Test] ! = [test] do {
   test
-    .assert("Int.FromString returns .some for valid integers", Int.FromString("-42") is .some n and n == -42)
-    .assert("Int.FromString returns .none! for invalid integers", Int.FromString("x") is .none!)
-    .assert("Nat.FromString returns .some for valid naturals", Nat.FromString("42") is .some n and n == 42)
-    .assert("Nat.FromString returns .none! for negative integers", Nat.FromString("-1") is .none!)
-    .assert("Float.FromString returns .some for valid floats", Float.FromString("1.5") is .some n and Float.Equals(n, 1.5, 0.0))
-    .assert("Float.FromString returns .none! for invalid floats", Float.FromString("x") is .none!)
+    .check("Int.FromString returns .some for valid integers", Int.FromString("-42") is .some n and n == -42)
+    .check("Int.FromString returns .none! for invalid integers", Int.FromString("x") is .none!)
+    .check("Nat.FromString returns .some for valid naturals", Nat.FromString("42") is .some n and n == 42)
+    .check("Nat.FromString returns .none! for negative integers", Nat.FromString("-1") is .none!)
+    .check("Float.FromString returns .some for valid floats", Float.FromString("1.5") is .some n and Float.Equals(n, 1.5, 0.0))
+    .check("Float.FromString returns .none! for invalid floats", Float.FromString("x") is .none!)
 } in !
 
 def TestJsonEqualsWithoutListEquals : [Test] ! = [test] do {
@@ -387,6 +387,6 @@ def TestJsonEqualsWithoutListEquals : [Test] ! = [test] do {
   ))
 
   test
-    .assert("Json.Equals still compares object contents", Json.Equals(object1, object2))
-    .assert("Json.Equals still rejects different nested list contents", not Json.Equals(object1, object3))
+    .check("Json.Equals still compares object contents", Json.Equals(object1, object2))
+    .check("Json.Equals still rejects different nested list contents", not Json.Equals(object1, object3))
 } in !

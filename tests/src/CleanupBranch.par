@@ -35,11 +35,11 @@ def TestAutomaticCleanup: [Test] ! = [test] do {
   let resource = case {
     .release* => case {
       .finish* => do {
-        test.assert(
+        test.check(
           "Automatic cleanup follows a non-close branch and disposes its result",
           .true!,
         )
-      } in test.done
+      } in !
     }
   }
 } in !
@@ -48,11 +48,11 @@ def TestAutomaticCleanupBeforeLoop: [Test] ! = [test] do {
   let resource = case {
     .release* => case {
       .finish* => do {
-        test.assert(
+        test.check(
           "Automatic cleanup happens before entering a recursive loop",
           .true!,
         )
-      } in test.done
+      } in !
     }
   }
 } in Nat.Repeat(1).begin.case {
@@ -64,8 +64,8 @@ def TestExplicitCleanupBranchCall: [Test] ! = [test] do {
   let resource: Resource = case {
     .release* => case {
       .finish* => do {
-        test.assert("A cleanup branch remains normally callable", .true!)
-      } in test.done
+        test.check("A cleanup branch remains normally callable", .true!)
+      } in !
     }
   }
   let finalizer = resource.release
@@ -75,8 +75,8 @@ def TestExplicitCleanupBranchCall: [Test] ! = [test] do {
 def TestExternalCleanupAlias: [Test] ! = [test] do {
   let resource: Finalizer = case {
     .finish* => do {
-      test.assert("Rust externals receive the synthesized cleanup branch", .true!)
-    } in test.done
+      test.check("Rust externals receive the synthesized cleanup branch", .true!)
+    } in !
   }
 
   let map = Map.New(type Nat, type Finalizer)
@@ -90,5 +90,5 @@ def TestExternalCleanupAlias: [Test] ! = [test] do {
 def TestDroppingUnfinishedBuilders: [Test] ! = [test] do {
   let strings = String.Builder.add("unfinished")
   let bytes = Bytes.Builder.add("unfinished")
-  test.assert("Unfinished String and Bytes builders are dropped via `.build*`", .true!)
-} in test.done
+  test.check("Unfinished String and Bytes builders are dropped via `.build*`", .true!)
+} in !

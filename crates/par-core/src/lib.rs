@@ -7,7 +7,7 @@ pub(crate) mod frontend_impl;
 pub(crate) mod location;
 #[path = "runtime/mod.rs"]
 pub(crate) mod runtime_impl;
-pub(crate) mod test_assertion;
+pub(crate) mod test_check;
 mod typed_readback;
 pub mod workspace;
 
