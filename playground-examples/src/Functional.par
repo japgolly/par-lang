@@ -6,7 +6,6 @@ module Functional
 // Playground, to see the results.
 
 import {
-  @core/Bytes
   @core/Int
   @core/List
   @core/Nat
@@ -14,7 +13,7 @@ import {
 }
 
 dec SortByLength : [List<String>] List<String>
-def SortByLength = [strings] strings->List.SortBy(box Bytes.Length)
+def SortByLength = [strings] strings->List.SortBy(box String.Length)
 
 def Sorted = SortByLength(*("learning", "Par", "is", "fun"))
 

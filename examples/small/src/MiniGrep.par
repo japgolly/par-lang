@@ -71,4 +71,4 @@ def GrepFile = [needle, reader]
     ->String.Lines
     ->Stream.Enumerate
     ->Stream.Map(box [(n) line] (n + 1) line)
-    ->Stream.Filter(box [(_) line] String.Find(line, .str needle) is .some _)
+    ->Stream.Filter(box [(_) line] line->String.Contains(.str needle))

@@ -31,6 +31,7 @@ external_def! {
         Parse => string_parser,
         ParseReader => string_parser_from_reader,
         Quote => string_quote,
+        Length => string_length,
         FromBytes => string_from_bytes,
         ToLower => string_to_lower,
         ToUpper => string_to_upper,
@@ -56,6 +57,11 @@ async fn string_builder(mut handle: Handle) {
 async fn string_quote(mut handle: Handle) {
     let s = handle.receive().string().await;
     handle.provide_string(ParString::from(format!("{:?}", s.as_str())));
+}
+
+async fn string_length(mut handle: Handle) {
+    let s = handle.receive().string().await;
+    handle.provide_nat(s.as_str().chars().count().into());
 }
 
 async fn string_parser(mut handle: Handle) {
