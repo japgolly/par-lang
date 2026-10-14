@@ -1,0 +1,16 @@
+module StreamTest
+
+import {
+  @core/Stream
+  @core/Test
+  @core/Try
+}
+
+def TestStreamFilterMap : [Test] ! = [test] do {
+  let kept = Stream.FromList(*(1, 2, 3, 1, 4))
+    ->Stream.FilterMap(box [n] if { n > 2 => .some {n * 10}, else => .none! })
+    ->Stream.ToList
+    ->Try.Ok
+
+  test.check("FilterMap maps kept items and skips the rest", kept == *(30, 40))
+} in !
