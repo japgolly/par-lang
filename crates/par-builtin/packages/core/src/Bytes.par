@@ -141,6 +141,9 @@ export {
   // closes the parser and drops any resulting source error.
   dec SplitByPattern : [<e: drop> Parser<e>, Pattern] Stream<e, Bytes>
 
+  // Trims ASCII whitespace (space, `\t`, `\n`, `\v`, `\f`, `\r`) from both ends of a byte sequence.
+  dec Trim : [Bytes] Bytes
+
   // Trims the given pattern once from the start of a byte sequence.
   dec TrimLeft : [Bytes, Pattern] Bytes
 
@@ -155,6 +158,9 @@ export {
 
   // Returns `.true!` if a whole byte sequence matches a pattern.
   dec Matches : [Bytes, Pattern] Bool
+
+  // Returns `.true!` if a pattern matches somewhere in a byte sequence.
+  dec Contains : [Bytes, Pattern] Bool
 
   // Returns the first byte sequence matched by a pattern, if one exists.
   dec Find : [Bytes, Pattern] Option<Bytes>
@@ -177,6 +183,25 @@ export {
   // // = "a#b#"
   // ```
   dec ReplacePattern : [Bytes, Pattern, box [Bytes] Bytes] Bytes
+
+  // Joins a list of byte sequences with a separator between each element.
+  dec Join : [List<Bytes>, Bytes] Bytes
+
+  // Concatenates a list of byte sequences into a single byte sequence.
+  //
+  // Since `Byte` is a subtype of `Bytes`, this also builds `Bytes` from a list of `Byte`s.
+  dec Concat : [List<Bytes>] Bytes
+
+  // Repeats a byte sequence the given number of times.
+  dec Repeat : [Bytes, Nat] Bytes
+
+  // `Bytes.PadLeft(b, width, fill)` prepends `fill` until `b` is `width` bytes long.
+  // Byte sequences already at least `width` bytes long are returned unchanged.
+  dec PadLeft : [Bytes, Nat, Byte] Bytes
+
+  // `Bytes.PadRight(b, width, fill)` appends `fill` until `b` is `width` bytes long.
+  // Byte sequences already at least `width` bytes long are returned unchanged.
+  dec PadRight : [Bytes, Nat, Byte] Bytes
 
   // Creates a `Reader` from a function that writes to a `Writer`.
   // The function receives a `Writer<!>` whose writes fail with `!` if the
@@ -247,6 +272,11 @@ def SplitByPattern = [<e: drop> parser, separator] do {
   },
 }
 
+def Trim = [bytes]
+  bytes
+    ->TrimLeft(AsciiWhitespace)
+    ->TrimRight(AsciiWhitespace)
+
 def TrimLeft = [bytes, pattern] Parse(bytes).begin.case {
   .empty! => bytes,
   .ready parser => parser.minMax(.empty!, pattern)->Try.Ok.case {
@@ -286,6 +316,8 @@ def Matches = [bytes, pattern] Parse(bytes).case {
     .match(_, _)! => .true!,
   }
 }
+
+def Contains = [bytes, pattern] bytes->Find(pattern) is .some _
 
 def Find = [bytes, pattern] Parse(bytes).case {
   .empty! => pattern->ContainsEmpty.case {
@@ -327,6 +359,46 @@ def ReplacePattern = [bytes, pattern, replace]
     },
   }
 
+def Join = [list, separator]
+  let builder = Builder
+  in list.case {
+    .end! => builder.build,
+    .item(v) list => do {
+      builder.add(v)
+    } in list.begin.case {
+      .end! => builder.build,
+      .item(v) list => do {
+        builder.add(separator).add(v)
+      } in list.loop,
+    },
+  }
+
+def Concat = [list]
+  let builder = Builder
+  in list.begin.case {
+    .end! => builder.build,
+    .item(v) list => do {
+      builder.add(v)
+    } in list.loop,
+  }
+
+def Repeat = [bytes, count]
+  let builder = Builder
+  in Nat.Repeat(count).begin.case {
+    .end! => builder.build,
+    .step next => do {
+      builder.add(bytes)
+    } in next.loop,
+  }
+
+def PadLeft = [bytes, width, fill]
+  let padding = fill->Repeat(Nat.Max(0, width - bytes->Length))
+  in Concat(*(padding, bytes))
+
+def PadRight = [bytes, width, fill]
+  let padding = fill->Repeat(Nat.Max(0, width - bytes->Length))
+  in Concat(*(bytes, padding))
+
 def PipeReader = external
 
 def ReadAll = [<e> reader] ParseReader(reader)->Remainder
@@ -347,3 +419,6 @@ def ContainsEmpty = [pattern] pattern.begin.case {
   .and ps => ps->List.All(box [p] p.loop),
   .or ps => ps->List.Any(box [p] p.loop),
 }
+
+dec AsciiWhitespace : Pattern
+def AsciiWhitespace = .repeat.or *(.bytes " ", .one.range(<<9>>, <<13>>)!)

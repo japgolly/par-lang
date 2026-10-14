@@ -1,0 +1,14 @@
+module BytesTest
+
+import {
+  @core/Bytes
+  @core/Test
+}
+
+def TestBytesAdditions : [Test] ! = [test] do {
+  test
+    .check("Trim strips ASCII whitespace from both ends", Bytes.Trim(" \t a b \r\n") == "a b")
+    .check("Join puts the separator only between items", Bytes.Join(*("a", "b", "c"), ", ") == "a, b, c")
+    .check("PadLeft fills up to the width", Bytes.PadLeft("7", 3, <<48>>) == "007")
+    .check("Padding counts bytes, not characters", Bytes.PadRight("č", 3, <<46>>) == "č.")
+} in !
