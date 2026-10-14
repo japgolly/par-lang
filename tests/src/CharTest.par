@@ -1,0 +1,20 @@
+module CharTest
+
+import {
+  @core/Char
+  @core/String
+  @core/Test
+}
+
+def TestCharClasses : [Test] ! = [test] do {
+  test
+    .check("A range includes its lower bound", Char.Is("a", .range("a", "f")!))
+    .check("A range includes its upper bound", Char.Is("f", .range("a", "f")!))
+    .check("A range excludes characters past it", not Char.Is("g", .range("a", "f")!))
+    .check("A range compares code points", Char.Is("č", .range("à", "ž")!))
+    .check("ASCII lower accepts lowercase", Char.Is("q", .ascii.lower!))
+    .check("ASCII lower rejects uppercase", not Char.Is("Q", .ascii.lower!))
+    .check("ASCII upper accepts uppercase", Char.Is("Q", .ascii.upper!))
+    .check("ASCII upper rejects non-ASCII uppercase", not Char.Is("Č", .ascii.upper!))
+    .check("Patterns use ranges", String.Matches("c0ffee", .repeat1.or *(.one.range("a", "f")!, .one.ascii.digit!)))
+} in !
