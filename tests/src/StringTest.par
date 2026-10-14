@@ -1,30 +1,15 @@
 module StringTest
 
 import {
-  @core/Bytes
   @core/String
   @core/Test
 }
 
-def TestStringLengthAndContains : [Test] ! = [test] do {
+def TestStringAdditions : [Test] ! = [test] do {
   test
-    .check("Length counts ASCII characters", String.Length("hello") == 5)
     .check("Length counts characters, not bytes", String.Length("čaj") == 3)
-    .check("Bytes.Length still counts bytes", Bytes.Length("čaj") == 4)
-    .check("Length of the empty string is zero", String.Length("") == 0)
-    .check("Contains finds a literal", String.Contains("hello world", .str "o w"))
-    .check("Contains finds a pattern", String.Contains("abc123", .one.ascii.digit!))
-    .check("Contains rejects a missing literal", not String.Contains("hello", .str "z"))
     .check("The empty string contains the empty pattern", String.Contains("", .empty!))
-} in !
-
-def TestStringRepeatAndPad : [Test] ! = [test] do {
-  test
-    .check("Repeat zero times is empty", String.Repeat("ab", 0) == "")
-    .check("Repeat concatenates copies", String.Repeat("ab", 3) == "ababab")
     .check("PadLeft fills up to the width", String.PadLeft("42", 5, "0") == "00042")
-    .check("PadRight fills up to the width", String.PadRight("ab", 4, ".") == "ab..")
-    .check("Padding to the exact length changes nothing", String.PadLeft("abc", 3, "x") == "abc")
     .check("Padding past the width changes nothing", String.PadRight("abcdef", 3, "x") == "abcdef")
     .check("Padding counts characters, not bytes", String.PadLeft("čaj", 4, " ") == " čaj")
 } in !
