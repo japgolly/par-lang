@@ -23,6 +23,9 @@ export {
   // `Nat.Clamp(x, lo, hi)` clamps `x` to the inclusive range `[lo, hi]`.
   dec Clamp : [Int, Nat, Nat] Nat
 
+  // `Nat.Pow(base, exponent)` raises `base` to the power `exponent`. `Nat.Pow(0, 0)` is `1`.
+  dec Pow : [Nat, Nat] Nat
+
   // Produces `n` repetitions of `.step`, followed by `.end!`.
   //
   // ```par
@@ -64,6 +67,8 @@ def Min = external
 def Max = external
 
 def Clamp = external
+
+def Pow = external
 
 def Repeat = external
 

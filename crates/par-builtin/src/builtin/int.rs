@@ -1,7 +1,7 @@
 //package: core
 use arcstr::literal;
 use num_bigint::{BigInt, BigUint};
-use num_traits::Zero;
+use num_traits::{Pow, Zero};
 use par_core::frontend::{ExternalTypeDef, PrimitiveType, Type};
 use par_core::source::Span;
 use par_runtime::external_def;
@@ -26,6 +26,7 @@ external_def! {
         Max => int_max,
         Abs => int_abs,
         Clamp => int_clamp,
+        Pow => int_pow,
         Range => int_range,
         FromString => int_from_string,
     }
@@ -61,6 +62,12 @@ async fn int_clamp(mut handle: Handle) {
     let min = handle.receive().int().await;
     let max = handle.receive().int().await;
     handle.provide_int(int.min(max).max(min));
+}
+
+async fn int_pow(mut handle: Handle) {
+    let base = handle.receive().int().await;
+    let exponent = handle.receive().nat().await;
+    handle.provide_int(base.pow(exponent));
 }
 
 async fn int_abs(mut handle: Handle) {

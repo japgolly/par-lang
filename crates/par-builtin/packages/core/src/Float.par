@@ -85,6 +85,12 @@ export {
   // Natural logarithm.
   dec Ln : [Float] Float
 
+  // Base-10 logarithm.
+  dec Log10 : [Float] Float
+
+  // Base-2 logarithm.
+  dec Log2 : [Float] Float
+
   // Sine.
   dec Sin : [Float] Float
 
@@ -93,6 +99,15 @@ export {
 
   // Tangent.
   dec Tan : [Float] Float
+
+  // Arcsine, in radians. Returns `NaN` outside `[-1, 1]`.
+  dec Asin : [Float] Float
+
+  // Arccosine, in radians. Returns `NaN` outside `[-1, 1]`.
+  dec Acos : [Float] Float
+
+  // Arctangent, in radians.
+  dec Atan : [Float] Float
 
   // `Float.Atan2(y, x)` is the two-argument arctangent of `(y, x)`.
   dec Atan2 : [Float, Float] Float
@@ -162,10 +177,20 @@ def Exp = external
 
 def Ln = external
 
+def Log10 = external
+
+def Log2 = external
+
 def Sin = external
 
 def Cos = external
 
 def Tan = external
+
+def Asin = external
+
+def Acos = external
+
+def Atan = external
 
 def Atan2 = external
