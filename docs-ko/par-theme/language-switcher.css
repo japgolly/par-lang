@@ -1,0 +1,22 @@
+/* Shared verbatim between the `par-theme` directories of all books. */
+
+#mdbook-menu-bar .language-switcher {
+    display: inline-block;
+    position: relative;
+}
+
+/* Reuses the look of mdBook's `.theme-popup`, but opens to the left of the right-hand buttons. */
+#mdbook-menu-bar .language-switcher .theme-popup {
+    left: auto;
+    right: 0;
+}
+
+[dir=rtl] #mdbook-menu-bar .language-switcher .theme-popup {
+    left: 0;
+    right: auto;
+}
+
+#mdbook-menu-bar .language-switcher .theme {
+    display: block;
+    box-sizing: border-box;
+}
