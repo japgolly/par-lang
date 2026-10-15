@@ -182,14 +182,14 @@ impl eframe::App for Playground {
 
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let initial_editor_width = ui.available_width() / 2.0;
                 egui::Panel::left("interaction")
                     .resizable(true)
                     .show_separator_line(true)
                     .default_size(initial_editor_width)
                     .frame(egui::Frame::NONE)
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         show_toolbar(ui, |ui| {
                             ui.horizontal(|ui| {
                                 if ui.button(egui::RichText::new("-").monospace()).clicked() {
@@ -240,9 +240,8 @@ impl eframe::App for Playground {
                             })
                             .show(ui, |ui| {
                                 egui::ScrollArea::vertical().show(ui, |ui| {
-                                    let editor = CodeEditor::default()
+                                    let (editor, _) = CodeEditor::default()
                                         .id_source("code")
-                                        .with_syntax(par_syntax())
                                         .with_rows(32)
                                         .with_fontsize(self.editor_font_size)
                                         .with_theme(self.get_theme(ui))
@@ -250,13 +249,14 @@ impl eframe::App for Playground {
                                         .show_with_completer(
                                             ui,
                                             self.sources.active_source_mut(),
+                                            &par_syntax(),
                                             &mut self.completer,
                                         );
 
                                     if let Some(cursor) = editor.cursor_range {
                                         self.cursor_pos = row_and_column(
                                             self.sources.active_source(),
-                                            cursor.primary.index,
+                                            cursor.primary.index.into(),
                                         );
                                     }
 
@@ -316,7 +316,10 @@ fn editor_hover_pos(output: &egui::text_edit::TextEditOutput) -> Option<(u32, u3
     }
 
     let hover_cursor = output.galley.cursor_from_pos(hover_pos - output.galley_pos);
-    Some(row_and_column(&output.galley.job.text, hover_cursor.index))
+    Some(row_and_column(
+        &output.galley.job.text,
+        hover_cursor.index.into(),
+    ))
 }
 
 fn show_toolbar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
@@ -702,7 +705,7 @@ impl Playground {
                 });
             });
 
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 egui::ScrollArea::both().show(ui, |ui| {
                     if let Some(error) = self.build.error() {
                         ui.label(
@@ -728,12 +731,11 @@ impl Playground {
                         {
                             CodeEditor::default()
                                 .id_source("compiled")
-                                .with_syntax(par_syntax())
                                 .with_rows(32)
                                 .with_fontsize(self.editor_font_size)
                                 .with_theme(theme)
                                 .with_numlines(true)
-                                .show(ui, &mut pretty);
+                                .show(ui, &mut pretty, &par_syntax());
                         }
                     }
 
@@ -766,6 +768,7 @@ fn par_syntax() -> Syntax {
         quotes: BTreeSet::from(['"', '`']),
         comment: "//",
         comment_multiline: [r#"/*"#, r#"*/"#],
+        word_start: BTreeSet::from(['_']),
         hyperlinks: BTreeSet::from([]),
         keywords: BTreeSet::from([
             "block",
@@ -811,6 +814,7 @@ fn par_syntax() -> Syntax {
         ]),
         types: BTreeSet::from([]),
         special: BTreeSet::from(["<>"]),
+        patch: Default::default(),
     }
 }
 

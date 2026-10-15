@@ -32,7 +32,7 @@ use par_runtime::external_def;
 use tokio::time::timeout;
 
 use sqlx::any::{AnyArguments, AnyPoolOptions, AnyRow};
-use sqlx::{Any, AnyPool, Column, Row as _, Transaction, TypeInfo, ValueRef};
+use sqlx::{Any, AnyPool, AssertSqlSafe, Column, Row as _, Transaction, TypeInfo, ValueRef};
 
 use par_runtime::primitive::{Number, ParString, Primitive};
 use par_runtime::readback::{Data, Handle};
@@ -50,7 +50,7 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
 const OP_TIMEOUT: Duration = Duration::from_secs(30);
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
-type AnyQuery<'q> = sqlx::query::Query<'q, Any, AnyArguments<'q>>;
+type AnyQuery = sqlx::query::Query<'static, Any, AnyArguments>;
 
 static INSTALL_DRIVERS: Once = Once::new();
 
@@ -419,15 +419,15 @@ async fn read_params(handle: Handle) -> Vec<Data> {
     readback_list(handle, |item| async move { item.data().await }).await
 }
 
-fn build_query<'q>(sql: &'q str, params: &[Data]) -> Result<AnyQuery<'q>, String> {
-    let mut query = sqlx::query(sql);
+fn build_query(sql: &str, params: &[Data]) -> Result<AnyQuery, String> {
+    let mut query = sqlx::query(AssertSqlSafe(sql));
     for param in params {
         query = bind_param(query, param)?;
     }
     Ok(query)
 }
 
-fn bind_param<'q>(query: AnyQuery<'q>, value: &Data) -> Result<AnyQuery<'q>, String> {
+fn bind_param(query: AnyQuery, value: &Data) -> Result<AnyQuery, String> {
     let Data::Either(tag, payload) = value else {
         return Err("invalid SQL parameter".to_string());
     };

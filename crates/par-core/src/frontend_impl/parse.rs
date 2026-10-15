@@ -936,11 +936,13 @@ fn typ(input: &mut Input) -> Result<Type<Unresolved>> {
         typ_choice,
         typ_break,
         typ_continue,
-        typ_recursive,
-        typ_iterative,
-        typ_self,
-        typ_send,
-        typ_receive,
+        alt((
+            typ_recursive,
+            typ_iterative,
+            typ_self,
+            typ_send,
+            typ_receive,
+        )),
     ))
     .context(StrContext::Label("type"))
     .parse_next(input)
@@ -1597,9 +1599,7 @@ fn expression_without_construction(input: &mut Input) -> Result<Expression<Unres
         expr_repoll,
         expr_if,
         expr_do,
-        expr_box,
-        expr_chan,
-        infix_or,
+        alt((expr_box, expr_chan, infix_or)),
     ))
     .context(StrContext::Label("expression"))
     .parse_next(input)
@@ -2050,8 +2050,7 @@ fn parse_construction(
                 cons_signal,
                 cons_case,
                 cons_break,
-                cons_send,
-                cons_receive,
+                alt((cons_send, cons_receive)),
             ))
             .context(StrContext::Label("construction"))
             .parse_next(input)?
@@ -2341,8 +2340,7 @@ fn apply(input: &mut Input) -> Result<Option<(Span, Apply<Unresolved>)>> {
             apply_case,
             apply_send,
             apply_default,
-            apply_try,
-            apply_pipe,
+            alt((apply_try, apply_pipe)),
         )))
         .parse_next(input)?;
         match piece {
@@ -2705,10 +2703,7 @@ fn process_head(input: &mut Input) -> Result<(Span, ProcessHead)> {
         proc_compound_assign,
         proc_catch,
         proc_throw,
-        proc_todo,
-        expression_command,
-        global_command,
-        command,
+        alt((proc_todo, expression_command, global_command, command)),
     ))
     .context(StrContext::Label("process"))
     .parse_next(input)
@@ -3326,12 +3321,14 @@ fn cmd(input: &mut Input) -> Result<Option<(Span, Command<Unresolved>)>> {
             cmd_loop,
             cmd_unbox,
             cmd_signal,
-            cmd_continue,
-            cmd_send,
-            cmd_receive,
-            cmd_try,
-            cmd_default,
-            cmd_pipe,
+            alt((
+                cmd_continue,
+                cmd_send,
+                cmd_receive,
+                cmd_try,
+                cmd_default,
+                cmd_pipe,
+            )),
         )))
         .context(StrContext::Label("command"))
         .parse_next(input)?;

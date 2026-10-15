@@ -13,14 +13,14 @@ jobs:
   format:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check formatting
         run: cargo fmt --check
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build
         run: cargo build --verbose
       - name: Run tests
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install mdBook
         run: |
@@ -45,7 +45,7 @@ jobs:
 
       - name: Install mdbook-linkcheck
         run: |
-          curl -sSL https://github.com/marxin/mdbook-linkcheck2/releases/download/v0.12.2/mdbook-linkcheck2-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          curl -sSL https://github.com/marxin/mdbook-linkcheck2/releases/download/v0.13.0/mdbook-linkcheck2-x86_64-unknown-linux-gnu.tar.gz | tar -xz
           sudo mv mdbook-linkcheck2 /usr/local/bin/
       
       - name: mdbook linkcheck

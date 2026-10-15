@@ -10,16 +10,16 @@ playground = []
 
 [dependencies]
 par-runtime = { path = "../par-runtime" }
-futures = { version = "0.3.31", features = ["executor", "thread-pool"] }
-indexmap = "2.7.0"
-winnow = { version = "0.7.4", features = [] }
+futures = { version = "0.3.34", features = ["executor", "thread-pool"] }
+indexmap = "2.14.2"
+winnow = { version = "1.0.4", features = [] }
 miette = { version = "7.6.0", features = ["fancy"] }
 arcstr = "1.2.0"
-num-bigint = "0.4.6"
-unescaper = "0.1.6"
-bytes = "1.6.1"
-im = "15"
-inventory = "0.3.22"
-serde = { version = "1.0.228", features = ["derive"] }
-toml = "0.9.8"
-toml_edit = "0.22"
+num-bigint = "0.5.1"
+unescaper = "0.2.0"
+bytes = "1.12.1"
+im = "15.1.0"
+inventory = "0.3.25"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+toml_edit = "0.25.17"

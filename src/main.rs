@@ -754,8 +754,10 @@ fn run_definition_vm(
                 return Err(());
             }
         };
-        let artifact: Artifact<Unlinked> = match bincode::deserialize_from(BufReader::new(file))
-        {
+        let artifact: Artifact<Unlinked> = match bincode::serde::decode_from_std_read(
+            &mut BufReader::new(file),
+            bincode::config::legacy(),
+        ) {
             Ok(artifact) => artifact,
             Err(error) => {
                 eprintln!(
@@ -860,7 +862,11 @@ fn compile(package_path: PathBuf, max_interactions: u32) -> Result<(), ()> {
             return Err(());
         }
     };
-    if let Err(error) = bincode::serialize_into(BufWriter::new(file), &artifact) {
+    if let Err(error) = bincode::serde::encode_into_std_write(
+        &artifact,
+        &mut BufWriter::new(file),
+        bincode::config::legacy(),
+    ) {
         eprintln!(
             "{}",
             format!("Failed to write {}: {error}", output_path.display()).bright_red()

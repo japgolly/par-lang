@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-askama = "0.14.0"
+askama = "0.16.1"
 miette = { version = "7.6.0", features = ["fancy"] }
 par-runtime = { path = "../par-runtime" }
 par-builtin = { path = "../par-builtin" }
 par-core = { path = "../par-core" }
 pathdiff = "0.2.3"
-percent-encoding = "2.3.1"
-pulldown-cmark = "0.13.0"
+percent-encoding = "2.3.2"
+pulldown-cmark = "0.13.4"
