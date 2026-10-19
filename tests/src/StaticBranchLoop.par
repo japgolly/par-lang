@@ -1,0 +1,28 @@
+module StaticBranchLoop
+
+import {
+  @core/Bool
+  @core/List
+  @core/Nat
+  @core/Test
+}
+
+// After the `.case`, `show` is known in each branch, so the `if` gets resolved at compile
+// time, inlining the `loop` back into the body of the loop that's still being compiled.
+dec CountTrue : [List<Bool>] Nat
+def CountTrue = [xs] let count: Nat = 0 in xs.begin.case {
+  .end! => count,
+  .item(b) rest => do {
+    let show: Bool = .false!
+    b.case {
+      .true! => { let show = .true! }
+      .false! => {}
+    }
+    if show => { let count = count + 1 }
+  } in rest.loop,
+}
+
+def TestStaticBranchBeforeLoop: [Test] ! = [test] do {
+  test.check("Flags rebound in branches can be tested before looping",
+    CountTrue(*(.true!, .false!, .true!, .true!)) == 3)
+} in !

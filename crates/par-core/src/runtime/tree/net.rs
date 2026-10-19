@@ -437,6 +437,13 @@ impl<Ext: Clone> Net<Ext> {
                 self.link(*d1, Package(id, Box::new(b0), FanBehavior::Propagate));
                 self.rewrites.commute += 1;
             }
+            // A package that's still being compiled can't be expanded yet. This happens when
+            // a statically known branch inlines a lazy reference to an enclosing loop body.
+            (Package(id, cx, fan), a) | (a, Package(id, cx, fan))
+                if self.is_package_pending(id) =>
+            {
+                self.waiting_for_reducer.push((Package(id, cx, fan), a));
+            }
             (Package(id, cx, FanBehavior::Propagate), Unbox(continuation))
             | (Unbox(continuation), Package(id, cx, FanBehavior::Propagate)) => {
                 let root = self.dereference_package(id, *cx);
@@ -521,6 +528,12 @@ impl<Ext: Clone> Net<Ext> {
 
             (p, tree) => unreachable!("Invalid primitive interaction of {:?} with {:?}", p, tree),
         }
+    }
+
+    fn is_package_pending(&self, package: usize) -> bool {
+        self.packages
+            .get(&package)
+            .is_some_and(|net| net.ports.is_empty())
     }
 
     fn dereference_package(&mut self, package: usize, cx: Tree<Ext>) -> Tree<Ext> {
