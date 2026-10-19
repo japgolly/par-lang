@@ -132,6 +132,66 @@ mod tests {
         ));
     }
 
+    fn is_var(typ: &Type<Universal>, name: &str) -> bool {
+        matches!(typ, Type::Var(_, var) if var.string == name)
+    }
+
+    #[test]
+    fn test_substitution_avoids_implicit_generic_capture() {
+        // [a := b] <b> [box [a] b] b  ==>  <b'> [box [b] b'] b'
+        let a = LocalName {
+            span: Span::None,
+            string: ArcStr::from("a"),
+        };
+        let replacement = Type::var("b");
+        let typ: Type<Universal> = Type::generic_function(
+            vec!["b"],
+            Type::box_(Type::function(Type::var("a"), Type::var("b"))),
+            Type::var("b"),
+        );
+
+        let substituted = typ
+            .substitute(BTreeMap::from([(&a, &replacement)]))
+            .unwrap();
+        let Type::Function(_, arg, ret, params) = substituted else {
+            panic!("expected function type")
+        };
+        assert_eq!(params.len(), 1);
+        let bound = params[0].name.string.as_str();
+        assert_eq!(bound, "b'");
+        let Type::Box(_, inner) = arg.as_ref() else {
+            panic!("expected box argument")
+        };
+        let Type::Function(_, inner_arg, inner_ret, _) = inner.as_ref() else {
+            panic!("expected boxed function")
+        };
+        assert!(is_var(inner_arg, "b"));
+        assert!(is_var(inner_ret, bound));
+        assert!(is_var(&ret, bound));
+    }
+
+    #[test]
+    fn test_hole_substitution_avoids_implicit_generic_capture() {
+        // [?a := b] (<b> b, ?a)  ==>  (<b'> b', b)
+        let a = LocalName {
+            span: Span::None,
+            string: ArcStr::from("a"),
+        };
+        let (hole, _) = Type::hole(a.clone());
+        let typ: Type<Universal> = Type::generic_pair(vec!["b"], Type::var("b"), hole);
+
+        let substituted =
+            typ.substitute_inferred_holes(&BTreeMap::from([(a.clone(), Type::var("b"))]));
+        let Type::Pair(_, left, right, params) = substituted else {
+            panic!("expected pair type")
+        };
+        assert_eq!(params.len(), 1);
+        let bound = params[0].name.string.as_str();
+        assert_eq!(bound, "b'");
+        assert!(is_var(&left, bound));
+        assert!(is_var(&right, "b"));
+    }
+
     #[test]
     fn test_self_polarity_through_nested_named_fixpoint() {
         let span = Span::None;

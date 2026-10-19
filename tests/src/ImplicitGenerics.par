@@ -1,0 +1,16 @@
+module ImplicitGenerics
+
+import {
+  @core/List
+  @core/Test
+}
+
+// List.Map is `[<a> List<a>, <b> box [a] b] List<b>`. Calling it from a definition whose
+// type variables reuse the names `a` and `b` for other roles must not confuse the two.
+dec SwappedMap : [<b> List<b>, <a> box [b] a] List<a>
+def SwappedMap = [<b> list, <a> f] List.Map(list, f)
+
+def TestSwappedTypeVariableNames : [Test] ! = [test] do {
+  test.check("Calls with same-named type variables infer correctly",
+    *(1, 2, 3)->SwappedMap(box [n] n * 10) == *(10, 20, 30))
+} in !

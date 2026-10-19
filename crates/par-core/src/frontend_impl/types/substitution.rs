@@ -1,4 +1,4 @@
-use super::super::language::LocalName;
+use super::super::language::{LocalName, TypeParameter};
 use super::core::Type;
 use super::error::TypeError;
 use crate::frontend_impl::types::visit;
@@ -107,22 +107,16 @@ impl<S: Clone> Type<S> {
                     *typ = map.get(name).cloned().cloned().unwrap().dual(Span::None);
                 }
                 Type::Exists(_span, param, body) | Type::Forall(_span, param, body) => {
-                    let old_name = param.name.clone();
-                    while map.values().any(|t| t.contains_var(&param.name)) {
-                        param.name.string = arcstr::format!("{}'", param.name.string);
-                    }
-                    if old_name != param.name {
-                        inner(
-                            body,
-                            &BTreeMap::from([(
-                                &old_name,
-                                &Type::Var(param.name.span.clone(), param.name.clone()),
-                            )]),
-                        )?;
-                    }
-                    let mut map = map.clone();
-                    map.remove(&old_name);
+                    let map = enter_binders(std::slice::from_mut(param), &mut [&mut **body], map)?;
                     inner(body, &map)?
+                }
+                Type::Pair(_span, left, right, params)
+                | Type::Function(_span, left, right, params)
+                    if !params.is_empty() =>
+                {
+                    let map = enter_binders(params, &mut [&mut **left, &mut **right], map)?;
+                    inner(left, &map)?;
+                    inner(right, &map)?;
                 }
                 Type::Recursive {
                     label,
@@ -159,6 +153,29 @@ impl<S: Clone> Type<S> {
             Ok(())
         }
 
+        /// Removes the names bound by `params` from `map`, first renaming those binders that
+        /// would capture a free variable of a replacement.
+        fn enter_binders<'m, S: Clone>(
+            params: &mut [TypeParameter],
+            bodies: &mut [&mut Type<S>],
+            map: &BTreeMap<&'m LocalName, &'m Type<S>>,
+        ) -> Result<BTreeMap<&'m LocalName, &'m Type<S>>, TypeError<S>> {
+            let mut map = map.clone();
+            for param in params.iter() {
+                map.remove(&param.name);
+            }
+            let renames = rename_capturing_binders(params, bodies, |name| {
+                map.values().any(|typ| typ.contains_var(name))
+            });
+            if !renames.is_empty() {
+                let renames = renames.iter().map(|(old, new)| (old, new)).collect();
+                for body in bodies.iter_mut() {
+                    inner(body, &renames)?;
+                }
+            }
+            Ok(map)
+        }
+
         let mut typ = self;
         inner(&mut typ, &map)?;
         Ok(typ)
@@ -172,6 +189,11 @@ impl<S: Clone> Type<S> {
                 }
                 Type::Forall(_, param, _) | Type::Exists(_, param, _)
                     if &param.name == target_name =>
+                {
+                    // var is shadowed
+                }
+                Type::Pair(_, _, _, params) | Type::Function(_, _, _, params)
+                    if params.iter().any(|param| &param.name == target_name) =>
                 {
                     // var is shadowed
                 }
@@ -199,6 +221,18 @@ impl<S: Clone> Type<S> {
                         *typ = replacement.clone().dual(Span::None);
                     }
                 }
+                Type::Exists(_span, param, body) | Type::Forall(_span, param, body) => {
+                    enter_binders(std::slice::from_mut(param), &mut [&mut **body], map);
+                    inner(body, map);
+                }
+                Type::Pair(_span, left, right, params)
+                | Type::Function(_span, left, right, params)
+                    if !params.is_empty() =>
+                {
+                    enter_binders(params, &mut [&mut **left, &mut **right], map);
+                    inner(left, map);
+                    inner(right, map);
+                }
                 Type::Recursive {
                     body, display_hint, ..
                 }
@@ -222,8 +256,55 @@ impl<S: Clone> Type<S> {
             }
         }
 
+        /// Renames binders that would capture a free variable of a hole's solution.
+        fn enter_binders<S: Clone>(
+            params: &mut [TypeParameter],
+            bodies: &mut [&mut Type<S>],
+            map: &BTreeMap<LocalName, Type<S>>,
+        ) {
+            let renames = rename_capturing_binders(params, bodies, |name| {
+                map.values().any(|typ| typ.contains_var(name))
+            });
+            if !renames.is_empty() {
+                let renames: BTreeMap<_, _> = renames.iter().map(|(old, new)| (old, new)).collect();
+                for body in bodies.iter_mut() {
+                    **body = body
+                        .clone()
+                        .substitute(renames.clone())
+                        .unwrap_or_else(|_| unreachable!("renaming type variables cannot fail"));
+                }
+            }
+        }
+
         let mut typ = self;
         inner(&mut typ, map);
         typ
     }
+}
+
+/// Renames those of `params` for which `captures` holds to fresh names, free in neither
+/// the `bodies` nor the replacements, and distinct from the other `params`. Returns the
+/// renames, which the caller must apply to the `bodies`.
+fn rename_capturing_binders<S: Clone>(
+    params: &mut [TypeParameter],
+    bodies: &[&mut Type<S>],
+    captures: impl Fn(&LocalName) -> bool,
+) -> Vec<(LocalName, Type<S>)> {
+    let mut renames = Vec::new();
+    for i in 0..params.len() {
+        let old_name = params[i].name.clone();
+        if !captures(&old_name) {
+            continue;
+        }
+        let mut new_name = old_name.clone();
+        while captures(&new_name)
+            || params.iter().any(|param| param.name == new_name)
+            || bodies.iter().any(|body| body.contains_var(&new_name))
+        {
+            new_name.string = arcstr::format!("{}'", new_name.string);
+        }
+        params[i].name = new_name.clone();
+        renames.push((old_name, Type::Var(new_name.span.clone(), new_name)));
+    }
+    renames
 }
