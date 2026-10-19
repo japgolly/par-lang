@@ -266,6 +266,21 @@ impl<S: Clone + Eq + std::hash::Hash> Context<S> {
                         steps.extend(typed_suffix.steps);
                         return Arc::new(Process::new(steps, typed_suffix.terminator));
                     }
+                    if let Command::Receive(parameter, ..) = command
+                        && parameter != name
+                    {
+                        match self.take_drop_shadow(parameter) {
+                            Ok(Some(shadowed_type)) => steps.push(Step::Do {
+                                span: span.clone(),
+                                name: parameter.clone(),
+                                usage: VariableUsage::Move,
+                                typ: shadowed_type,
+                                command: Command::Close,
+                            }),
+                            Ok(None) => {}
+                            Err(error) => emit(error),
+                        }
+                    }
                     let command = self.check_step_command(span, name, &typ, command, emit);
                     steps.push(Step::Do {
                         span: span.clone(),
@@ -1191,7 +1206,9 @@ impl<S: Clone + Eq + std::hash::Hash> Context<S> {
                         emit(error);
                     }
                 }
-                self.put(span, parameter.clone(), param_type.clone()).ok();
+                if let Err(error) = self.put(span, parameter.clone(), param_type.clone()) {
+                    emit(error);
+                }
                 self.put(span, object.clone(), then_type).ok();
                 Command::Receive(
                     parameter.clone(),
@@ -1921,6 +1938,24 @@ impl<S: Clone + Eq + std::hash::Hash> Context<S> {
                                 (Type::Fail(span.clone()), true)
                             }
                         };
+                        if parameter != name {
+                            match self.take_drop_shadow(parameter) {
+                                Ok(Some(shadowed_type)) => {
+                                    shadow_closes.insert(
+                                        index,
+                                        Step::Do {
+                                            span: span.clone(),
+                                            name: parameter.clone(),
+                                            usage: VariableUsage::Move,
+                                            typ: shadowed_type,
+                                            command: Command::Close,
+                                        },
+                                    );
+                                }
+                                Ok(None) => {}
+                                Err(error) => emit(error),
+                            }
+                        }
                         if let Err(error) =
                             self.put(span, parameter.clone(), parameter_type.clone())
                         {

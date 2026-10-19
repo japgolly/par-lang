@@ -92,3 +92,22 @@ def TestDroppingUnfinishedBuilders: [Test] ! = [test] do {
   let bytes = Bytes.Builder.add("unfinished")
   test.check("Unfinished String and Bytes builders are dropped via `.build*`", .true!)
 } in !
+
+dec ShadowedFinalizer : [Test, String] Finalizer
+def ShadowedFinalizer = [test, label] case {
+  .finish* => do {
+    test.check(
+      `Receiving into an already bound name disposes the old value (${label})`,
+      .true!,
+    )
+  } in !,
+}
+
+dec ShadowedFinalizers : [Test, String] (Finalizer, Finalizer) !
+def ShadowedFinalizers = [test, label]
+  (ShadowedFinalizer(test, `${label}1`), ShadowedFinalizer(test, `${label}2`))!
+
+def TestCleanupShadowedReceive: [Test] ! = [test] do {
+  ShadowedFinalizers(test, "a")[x, _]?
+  ShadowedFinalizers(test, "b")[y, _]?
+} in !
