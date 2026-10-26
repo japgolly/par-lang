@@ -199,7 +199,7 @@ while remembering that the hidden type satisfies [`drop`](./constraints.md#the-d
 type AnyDroppable = (<a: drop> a)!
 ```
 
-This is the implicit counterpart of the existential type:
+This is the explicit counterpart of the existential type:
 
 ```par
 type DropMe = (type a: drop) a
